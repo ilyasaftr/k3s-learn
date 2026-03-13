@@ -1,0 +1,16 @@
+tempo:
+  tag: "2.10.2"
+  reportingEnabled: false
+  retention: 24h
+
+persistence:
+  enabled: false
+
+serviceMonitor:
+  enabled: false
+
+receivers:
+  otlp:
+    protocols:
+      grpc: {}
+      http: {}

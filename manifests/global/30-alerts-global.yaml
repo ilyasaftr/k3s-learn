@@ -1,0 +1,177 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kgateway-global-alerts
+  namespace: observability
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: platform.recording.rules
+      rules:
+        - record: cluster:cpu_usage_percent:5m
+          expr: 100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+        - record: cluster:cpu_used_cores:5m
+          expr: sum(rate(node_cpu_seconds_total{mode!="idle"}[5m]))
+        - record: cluster:cpu_total_cores
+          expr: sum(machine_cpu_cores)
+        - record: cluster:memory_usage_percent
+          expr: (1 - (sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes))) * 100
+        - record: cluster:memory_used_bytes
+          expr: sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)
+        - record: cluster:memory_available_bytes
+          expr: sum(node_memory_MemAvailable_bytes)
+        - record: cluster:memory_total_bytes
+          expr: sum(node_memory_MemTotal_bytes)
+        - record: cluster:rootfs_usage_percent
+          expr: 100 * (1 - (sum(node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}) / sum(node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"})))
+        - record: cluster:k8s_memory_workingset_bytes
+          expr: sum(container_memory_working_set_bytes{container!="",pod!=""})
+        - record: cluster:k8s_memory_requests_bytes
+          expr: sum(kube_pod_container_resource_requests{resource="memory"} * on(namespace,pod) group_left() (max by (namespace,pod) (kube_pod_status_phase{phase="Running"} == 1)))
+        - record: cluster:k8s_memory_limits_bytes
+          expr: sum(kube_pod_container_resource_limits{resource="memory"} * on(namespace,pod) group_left() (max by (namespace,pod) (kube_pod_status_phase{phase="Running"} == 1)))
+        - record: node:cpu_usage_percent:5m
+          expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+        - record: node:memory_usage_percent
+          expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+
+    - name: kgateway.global.rules
+      rules:
+        # Golden Signal: Traffic / Errors
+        - alert: KGatewayDeploymentUnavailable
+          expr: count(up{job="kgateway-gateways"}) > 0 and count(up{job="kgateway-gateways"} == 1) < 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "kgateway proxy has no healthy scrape targets"
+            description: "kgateway proxy scrape targets exist, but none are healthy for more than 5 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#kgateway-proxy-has-no-data"
+
+        - alert: KGatewayScrapeMissing
+          expr: absent(up{job="kgateway-gateways"})
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "kgateway scrape target missing"
+            description: "Prometheus does not see the kgateway-gateways target for 10 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#kgateway-proxy-has-no-data"
+
+        - alert: KGatewayHigh5xx
+          expr: sum(rate(envoy_http_downstream_rq_xx{job="kgateway-gateways",envoy_response_code_class="5"}[5m])) > 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High 5xx rate on kgateway ({{ $value | humanize }} rq/s)"
+            description: "kgateway downstream 5xx rate is above 1 req/s for 5 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+        # Golden Signal: Latency
+        - alert: KGatewayHighLatency
+          expr: |
+            1000 * histogram_quantile(0.95,
+              sum(rate(envoy_http_downstream_rq_time_bucket{
+                job="kgateway-gateways"
+              }[5m])) by (le)
+            ) > 500
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "kgateway p95 latency above 500ms ({{ $value | humanize }}ms)"
+            description: "kgateway downstream p95 latency has been above 500ms for 10 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+        # Golden Signal: Saturation
+        - alert: KGatewayProxyCpuThrottled
+          expr: |
+            100 * sum(rate(container_cpu_cfs_throttled_periods_total{
+              namespace="kgateway-system",
+              pod=~"shared-gateway-.*"
+            }[5m])) / clamp_min(sum(rate(container_cpu_cfs_periods_total{
+              namespace="kgateway-system",
+              pod=~"shared-gateway-.*"
+            }[5m])), 1) > 25
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "kgateway proxy CPU throttled ({{ $value | humanize }}%)"
+            description: "kgateway proxy pods are CPU throttled above 25% for 10 minutes. Consider increasing CPU limits."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+    - name: platform.resource.rules
+      rules:
+        # Fix: dynamic job match instead of hardcoded job names
+        - alert: PlatformCriticalTargetDown
+          expr: min by (job) (up{job=~"kgateway-gateways|demo-app-metrics|kube-.+|node-.+"}) < 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Scrape target {{ $labels.job }} is down"
+            description: "Target {{ $labels.job }} has been down for more than 5 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+        - alert: ClusterHighCpuUsage
+          expr: cluster:cpu_usage_percent:5m > 85
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cluster CPU usage above 85% ({{ $value | humanize }}%)"
+            description: "Cluster CPU usage has been above 85% for 15 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+        - alert: ClusterHighMemoryUsage
+          expr: cluster:memory_usage_percent > 85
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cluster memory usage above 85% ({{ $value | humanize }}%)"
+            description: "Cluster memory usage has been above 85% for 15 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+        - alert: ClusterHighRootfsUsage
+          expr: cluster:rootfs_usage_percent > 85
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cluster root filesystem usage above 85% ({{ $value | humanize }}%)"
+            description: "Cluster root filesystem usage has been above 85% for 15 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+        - alert: NodeHighCpuUsage
+          expr: node:cpu_usage_percent:5m > 85
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node {{ $labels.instance }} CPU above 85% ({{ $value | humanize }}%)"
+            description: "Node {{ $labels.instance }} CPU has been above 85% for 15 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+        - alert: NodeHighMemoryUsage
+          expr: node:memory_usage_percent > 90
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node {{ $labels.instance }} memory above 90% ({{ $value | humanize }}%)"
+            description: "Node {{ $labels.instance }} memory has been above 90% for 15 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+        - alert: NodeLowDiskSpace
+          expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay",mountpoint="/"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay",mountpoint="/"}) * 100 < 15
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node {{ $labels.instance }} root disk below 15% free ({{ $value | humanize }}% free)"
+            description: "Node {{ $labels.instance }} root filesystem free space is below 15%."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"

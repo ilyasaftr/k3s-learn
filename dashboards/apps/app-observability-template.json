@@ -1,0 +1,963 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "enable": true,
+        "expr": "ALERTS{alertstate=\"firing\", namespace=\"$namespace\"}",
+        "hide": false,
+        "iconColor": "red",
+        "name": "Firing Alerts",
+        "step": "60s",
+        "titleFormat": "Firing {{alertname}}",
+        "textFormat": "namespace={{namespace}} severity={{severity}}",
+        "type": "query"
+      }
+    ]
+  },
+  "description": "Per-app dashboard organized around the Google SRE monitoring guidance: symptom-first golden signals for user impact, followed by minimal white-box capacity context to explain why the app is degrading.",
+  "editable": true,
+  "links": [
+    {
+      "icon": "external link",
+      "title": "Envoy",
+      "tooltip": "Go to the upstream Envoy dashboard",
+      "type": "link",
+      "url": "/d/kgateway-envoy",
+      "targetBlank": false
+    },
+    {
+      "icon": "external link",
+      "title": "Kgateway Operations",
+      "tooltip": "Go to the kgateway control-plane dashboard",
+      "type": "link",
+      "url": "/d/kgateway-operations",
+      "targetBlank": false
+    },
+    {
+      "icon": "external link",
+      "title": "kgateway Log Overview",
+      "tooltip": "Go to the gateway OTLP log dashboard",
+      "type": "link",
+      "url": "/d/kgateway-log-overview",
+      "targetBlank": false
+    }
+  ],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Symptoms (Four Golden Signals)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "User-facing traffic routed through kgateway to this app. This is the first symptom signal from the Google SRE model.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "id": 101,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(envoy_cluster_upstream_rq_total{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\"}[$__rate_interval]))",
+          "legendFormat": "traffic",
+          "refId": "A"
+        }
+      ],
+      "title": "Traffic (req/s)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Server-side failures seen by callers. This is the high-signal error symptom for this app path.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "id": 102,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "(100 * sum(rate(envoy_cluster_upstream_rq_total{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\",envoy_response_code=~\"5..\"}[$__rate_interval])) / clamp_min(sum(rate(envoy_cluster_upstream_rq_total{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\"}[$__rate_interval])), 0.001)) or on() vector(0)",
+          "legendFormat": "5xx %",
+          "refId": "A"
+        }
+      ],
+      "title": "Error Rate (5xx %)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Tail latency for upstream requests. Tail latency is the user-visible latency signal emphasized in the SRE guidance.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 300
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "id": 103,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "1000 * histogram_quantile(0.95, sum(rate(envoy_cluster_upstream_rq_time_bucket{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ],
+      "title": "Latency p95 (ms)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Saturation is app-specific. For this lab, the useful saturation signals are CPU throttling and memory pressure against configured limits; the panel shows the worse of the two.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "id": 104,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max(((100 * sum(rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\",pod=~\"$app-.*\",container!=\"POD\"}[$__rate_interval])) / clamp_min(sum(rate(container_cpu_cfs_periods_total{namespace=\"$namespace\",pod=~\"$app-.*\",container!=\"POD\"}[$__rate_interval])), 1)) or on() vector(0)) or ((100 * sum(container_memory_working_set_bytes{namespace=\"$namespace\",pod=~\"$app-.*\",container!=\"POD\"}) / clamp_min(sum(kube_pod_container_resource_limits{namespace=\"$namespace\",pod=~\"$app-.*\",resource=\"memory\"}), 1)) or on() vector(0)))",
+          "legendFormat": "worst saturation %",
+          "refId": "A"
+        }
+      ],
+      "title": "Saturation (CPU or Memory %)",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 200,
+      "panels": [],
+      "title": "Symptom Trends",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Traffic should be broken down by response code class so you can distinguish normal load from client and server-side failure patterns.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "gradientMode": "opacity",
+            "spanNulls": true,
+            "showPoints": "never",
+            "lineInterpolation": "smooth"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "min",
+            "max",
+            "mean",
+            "lastNotNull"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "id": 201,
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(envoy_cluster_upstream_rq_total{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\"}[$__rate_interval]))",
+          "legendFormat": "total",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(envoy_cluster_upstream_rq_total{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\",envoy_response_code=~\"2..\"}[$__rate_interval])) or on() vector(0)",
+          "legendFormat": "2xx",
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(envoy_cluster_upstream_rq_total{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\",envoy_response_code=~\"4..\"}[$__rate_interval])) or on() vector(0)",
+          "legendFormat": "4xx",
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(envoy_cluster_upstream_rq_total{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\",envoy_response_code=~\"5..\"}[$__rate_interval])) or on() vector(0)",
+          "legendFormat": "5xx",
+          "refId": "D"
+        }
+      ],
+      "title": "Request Volume by Response Class",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "The SRE guidance recommends monitoring all HTTP response classes even when only some are alert-worthy. This separates caller mistakes from server failures.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "gradientMode": "opacity",
+            "spanNulls": true,
+            "showPoints": "never",
+            "lineInterpolation": "smooth"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "min",
+            "max",
+            "mean",
+            "lastNotNull"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "id": 202,
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "(100 * sum(rate(envoy_cluster_upstream_rq_total{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\",envoy_response_code=~\"4..\"}[$__rate_interval])) / clamp_min(sum(rate(envoy_cluster_upstream_rq_total{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\"}[$__rate_interval])), 0.001)) or on() vector(0)",
+          "legendFormat": "4xx %",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "(100 * sum(rate(envoy_cluster_upstream_rq_total{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\",envoy_response_code=~\"5..\"}[$__rate_interval])) / clamp_min(sum(rate(envoy_cluster_upstream_rq_total{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\"}[$__rate_interval])), 0.001)) or on() vector(0)",
+          "legendFormat": "5xx %",
+          "refId": "B"
+        }
+      ],
+      "title": "Error Ratio by Response Class",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Tail latency should be graphed explicitly. p50 explains normal behavior; p95 and p99 show user pain during degradation.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "gradientMode": "opacity",
+            "spanNulls": true,
+            "showPoints": "never",
+            "lineInterpolation": "smooth"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "min",
+            "max",
+            "mean",
+            "lastNotNull"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "id": 203,
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "1000 * histogram_quantile(0.50, sum(rate(envoy_cluster_upstream_rq_time_bucket{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "1000 * histogram_quantile(0.95, sum(rate(envoy_cluster_upstream_rq_time_bucket{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "1000 * histogram_quantile(0.99, sum(rate(envoy_cluster_upstream_rq_time_bucket{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "title": "Latency Distribution (p50 / p95 / p99)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Saturation should reflect the resource that actually constrains the app. Here that is CPU throttling and memory pressure; disk I/O is intentionally excluded because this podinfo workload is not storage-bound.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "gradientMode": "opacity",
+            "spanNulls": true,
+            "showPoints": "never",
+            "lineInterpolation": "smooth"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "min",
+            "max",
+            "mean",
+            "lastNotNull"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "id": 204,
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "(100 * sum(rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\",pod=~\"$app-.*\",container!=\"POD\"}[$__rate_interval])) / clamp_min(sum(rate(container_cpu_cfs_periods_total{namespace=\"$namespace\",pod=~\"$app-.*\",container!=\"POD\"}[$__rate_interval])), 1)) or on() vector(0)",
+          "legendFormat": "cpu throttle %",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "(100 * sum(container_memory_working_set_bytes{namespace=\"$namespace\",pod=~\"$app-.*\",container!=\"POD\"}) / clamp_min(sum(kube_pod_container_resource_limits{namespace=\"$namespace\",pod=~\"$app-.*\",resource=\"memory\"}), 1)) or on() vector(0)",
+          "legendFormat": "memory pressure %",
+          "refId": "B"
+        }
+      ],
+      "title": "Saturation Trend (CPU Throttle / Memory Pressure %)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 300,
+      "panels": [],
+      "title": "Cause and Capacity Context",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "White-box context: how many replicas are currently ready to serve traffic for this deployment.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 23
+      },
+      "id": 301,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(kube_deployment_status_replicas_ready{namespace=\"$namespace\",deployment=\"$app\"})",
+          "legendFormat": "ready replicas",
+          "refId": "A"
+        }
+      ],
+      "title": "Ready Replicas",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "White-box cause indicator: unavailable replicas often explain error spikes or tail latency regressions.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 23
+      },
+      "id": 302,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(kube_deployment_status_replicas_unavailable{namespace=\"$namespace\",deployment=\"$app\"})",
+          "legendFormat": "unavailable replicas",
+          "refId": "A"
+        }
+      ],
+      "title": "Unavailable Replicas",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Recent container restarts are a fast indicator of crash loops or deploy instability affecting this app.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 23
+      },
+      "id": 303,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\",pod=~\"$app-.*\"}[30m]))",
+          "legendFormat": "restarts/30m",
+          "refId": "A"
+        }
+      ],
+      "title": "Restarts (30m)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Compact capacity context: requests per currently ready replica. Useful for explaining whether load increases, rather than failures alone, are driving user-visible symptoms.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 23
+      },
+      "id": 304,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(envoy_cluster_upstream_rq_total{job=\"kgateway-gateways\",envoy_cluster_name=~\"^kube_${namespace}_${app}_[0-9]+$\"}[$__rate_interval])) / clamp_min(sum(kube_deployment_status_replicas_ready{namespace=\"$namespace\",deployment=\"$app\"}), 1)",
+          "legendFormat": "req per ready replica",
+          "refId": "A"
+        }
+      ],
+      "title": "Requests per Ready Replica",
+      "type": "stat"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "kgateway",
+    "app",
+    "four-golden-signals",
+    "prometheus"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "Prometheus"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "queryValue": "",
+        "refresh": 1,
+        "regex": ".*",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "demo",
+          "value": "demo"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(kube_deployment_labels, namespace)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Namespace",
+        "multi": false,
+        "name": "namespace",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(kube_deployment_labels, namespace)",
+          "refId": "NamespaceVarQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "podinfo",
+          "value": "podinfo"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(kube_deployment_labels{namespace=\"$namespace\"}, deployment)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "App",
+        "multi": false,
+        "name": "app",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(kube_deployment_labels{namespace=\"$namespace\"}, deployment)",
+          "refId": "AppVarQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m"
+    ],
+    "time_options": [
+      "5m",
+      "15m",
+      "1h",
+      "3h",
+      "6h",
+      "12h",
+      "24h",
+      "2d",
+      "7d"
+    ]
+  },
+  "timezone": "browser",
+  "title": "App Observability Template",
+  "uid": "app-observability-template",
+  "version": 3
+}

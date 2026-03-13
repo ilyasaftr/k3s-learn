@@ -1,0 +1,39 @@
+mode: deployment
+
+fullnameOverride: otel-collector-traces
+
+image:
+  repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-k8s
+  tag: "0.147.0"
+
+command:
+  name: otelcol-k8s
+
+alternateConfig:
+  extensions:
+    health_check:
+      endpoint: ${env:MY_POD_IP}:13133
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: ${env:MY_POD_IP}:4317
+        http:
+          endpoint: ${env:MY_POD_IP}:4318
+  processors:
+    memory_limiter:
+      check_interval: 2s
+      limit_mib: 256
+    batch: {}
+  exporters:
+    otlp:
+      endpoint: tempo.observability.svc.cluster.local:4317
+      tls:
+        insecure: true
+  service:
+    extensions: [health_check]
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [otlp]

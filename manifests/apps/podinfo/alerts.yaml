@@ -1,0 +1,96 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: podinfo-app-alerts
+  namespace: observability
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: podinfo.app.rules
+      rules:
+        # Golden Signal: Traffic (Availability)
+        - alert: PodinfoDeploymentUnavailable
+          expr: kube_deployment_status_replicas_available{namespace="demo",deployment="podinfo"} < 1
+          for: 5m
+          labels:
+            severity: critical
+            app: podinfo
+          annotations:
+            summary: "podinfo deployment unavailable"
+            description: "demo/podinfo has no available replicas for 5 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+        # Golden Signal: Errors
+        - alert: PodinfoPodRestartsHigh
+          expr: increase(kube_pod_container_status_restarts_total{namespace="demo",pod=~"podinfo-.*"}[15m]) > 3
+          for: 5m
+          labels:
+            severity: warning
+            app: podinfo
+          annotations:
+            summary: "podinfo pods restarting frequently ({{ $value }} restarts/15m)"
+            description: "podinfo pods restarted more than 3 times in 15 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+        - alert: PodinfoUpstream5xxRate
+          expr: sum(rate(envoy_cluster_upstream_rq_xx{job="kgateway-gateways",envoy_cluster_name=~"^kube_demo_podinfo_[0-9]+$",envoy_response_code_class="5"}[5m])) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+            app: podinfo
+          annotations:
+            summary: "podinfo upstream 5xx rate is high ({{ $value | humanize }} rq/s)"
+            description: "podinfo upstream 5xx rate exceeds 0.5 req/s for 10 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+        # Golden Signal: Latency
+        - alert: PodinfoUpstreamHighLatency
+          expr: |
+            1000 * histogram_quantile(0.95,
+              sum(rate(envoy_cluster_upstream_rq_time_bucket{
+                job="kgateway-gateways",
+                envoy_cluster_name=~"^kube_demo_podinfo_[0-9]+$"
+              }[5m])) by (le)
+            ) > 500
+          for: 10m
+          labels:
+            severity: warning
+            app: podinfo
+          annotations:
+            summary: "podinfo p95 upstream latency above 500ms ({{ $value | humanize }}ms)"
+            description: "podinfo p95 upstream latency through kgateway has been above 500ms for 10 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+        # Golden Signal: Saturation
+        - alert: PodinfoCpuThrottled
+          expr: |
+            100 * sum(rate(container_cpu_cfs_throttled_periods_total{
+              namespace="demo", pod=~"podinfo-.*", container!="POD"
+            }[5m])) / clamp_min(sum(rate(container_cpu_cfs_periods_total{
+              namespace="demo", pod=~"podinfo-.*", container!="POD"
+            }[5m])), 1) > 25
+          for: 10m
+          labels:
+            severity: warning
+            app: podinfo
+          annotations:
+            summary: "podinfo CPU throttled above 25% ({{ $value | humanize }}%)"
+            description: "podinfo pods are CPU throttled above 25% for 10 minutes. Consider increasing CPU limits."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
+
+        - alert: PodinfoMemoryNearLimit
+          expr: |
+            100 * sum(container_memory_working_set_bytes{
+              namespace="demo", pod=~"podinfo-.*", container!="POD"
+            }) / clamp_min(sum(kube_pod_container_resource_limits{
+              namespace="demo", pod=~"podinfo-.*", resource="memory"
+            }), 1) > 90
+          for: 10m
+          labels:
+            severity: warning
+            app: podinfo
+          annotations:
+            summary: "podinfo memory near limit ({{ $value | humanize }}% of limit)"
+            description: "podinfo memory working set is above 90% of its configured limit. OOMKill risk."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
