@@ -76,6 +76,12 @@ Current pinned chart versions in this repo (verified on 2026-03-13):
 
 Note: Tempo project is active. The old `grafana/tempo` chart path is deprecated; this repo uses the maintained `grafana-community/tempo` chart source.
 
+Observability profiles:
+
+- Default profile: `single-node-prod-small`
+- Goal: durable single-node production for k3s with PVC-backed Prometheus, Loki, Tempo, and Alertmanager plus explicit memory budgets
+- Future path: add a separate multi-node HA profile later instead of overloading the single-node defaults
+
 Example k3s install:
 
 ```bash
@@ -132,13 +138,29 @@ kubectl wait --for=condition=Available -n cert-manager deploy/cert-manager-cainj
 
 ## Install OTel Stack
 
-Install Prometheus/Grafana + Loki + Tempo + three OTel collectors:
+Install Prometheus/Grafana + Loki + Tempo + three OTel collectors.
+
+The default profile is `single-node-prod-small`, which is the low-memory production profile for k3s:
 
 ```bash
 make install-otel-stack
 ```
 
+To install a different profile in the future:
+
+```bash
+make install-otel-stack OTEL_PROFILE=single-node-prod-small
+```
+
 This installs all observability components in namespace `observability`.
+
+The `single-node-prod-small` profile currently does all of the following:
+
+- keeps Prometheus, Grafana, Alertmanager, Loki, Tempo, and the three OTel collectors
+- enables PVC-backed storage for Prometheus, Loki, Tempo, and Alertmanager
+- applies explicit memory requests and limits to the core monitoring pods
+- reduces Prometheus retention to `72h` and Tempo retention to `24h`
+- disables `kubeEtcd`, `kubeControllerManager`, `kubeScheduler`, and `kubeProxy` scraping to keep the namespace smaller on k3s
 
 ## Apply This Repo
 
@@ -161,6 +183,7 @@ make apply-issuer-example
 ```bash
 make verify-otel-stack
 make verify-global
+kubectl get pvc -n observability
 ```
 
 ### Verify TLS and apps
@@ -202,6 +225,9 @@ In Grafana, verify:
 - App-side OTel instrumentation is not required for v1.
 - `podinfo` works with gateway-generated logs/traces immediately.
 - App `/metrics` scraping is still retained (via OTel metrics collector), so app-level operational visibility remains.
+- Tempo remains gateway-level tracing only in this profile.
+- The low-memory defaults are tuned for single-node durability, not HA.
+- Multi-node readiness is handled by the profile layout; do not scale this profile into HA by only increasing replica counts.
 
 ## Optional: Tailscale Access for Grafana
 
@@ -260,7 +286,10 @@ kubectl get svc -n observability | grep tempo
 ```bash
 kubectl logs -n observability deploy/otel-collector-logs --tail=200
 kubectl get svc -n observability | grep loki
-helm upgrade -i otel-collector-logs open-telemetry/opentelemetry-collector -n observability --version 0.147.0 --reset-values -f manifests/global/otel-stack/otel-collector-logs-values.yaml
+helm upgrade -i otel-collector-logs open-telemetry/opentelemetry-collector -n observability \
+  --version 0.147.0 --reset-values \
+  -f manifests/global/otel-stack/otel-collector-logs-values.yaml \
+  -f manifests/global/otel-stack/profiles/single-node-prod-small/otel-collector-logs-values.yaml
 ```
 
 - No metrics for gateway/apps:

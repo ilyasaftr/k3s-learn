@@ -1,0 +1,14 @@
+tempo:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+  metricsGenerator:
+    enabled: false
+  retention: 24h
+
+persistence:
+  enabled: true
+  size: 10Gi

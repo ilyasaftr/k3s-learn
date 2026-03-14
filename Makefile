@@ -1,8 +1,10 @@
 KUBECTL ?= kubectl
 HELM ?= helm
 APP ?= podinfo
+OTEL_PROFILE ?= single-node-prod-small
 
 APP_DIR := manifests/apps/$(APP)
+OTEL_PROFILE_DIR := manifests/global/otel-stack/profiles/$(OTEL_PROFILE)
 
 .PHONY: apply-issuer-example install-optional-tailscale-operator install-otel-stack apply-global apply-app apply-all apply-optional-tailscale-grafana verify-global verify-tls verify-otel-stack verify-app verify-all verify-optional-tailscale-grafana clean-app clean-global clean-otel-stack clean-optional-tailscale-grafana clean-all check-app
 
@@ -21,6 +23,7 @@ install-optional-tailscale-operator:
 		--wait
 
 install-otel-stack:
+	@test -d $(OTEL_PROFILE_DIR) || (echo "Unknown OTEL_PROFILE=$(OTEL_PROFILE). Available: single-node-prod-small" && exit 1)
 	$(HELM) repo add prometheus-community https://prometheus-community.github.io/helm-charts
 	$(HELM) repo add grafana https://grafana.github.io/helm-charts
 	$(HELM) repo add grafana-community https://grafana-community.github.io/helm-charts
@@ -29,30 +32,36 @@ install-otel-stack:
 	$(HELM) upgrade -i kube-prometheus-stack prometheus-community/kube-prometheus-stack \
 		--namespace observability --create-namespace \
 		--version 82.10.3 \
-		-f manifests/global/otel-stack/kube-prometheus-stack-values.yaml
+		-f manifests/global/otel-stack/kube-prometheus-stack-values.yaml \
+		-f $(OTEL_PROFILE_DIR)/kube-prometheus-stack-values.yaml
 	$(HELM) upgrade -i loki grafana/loki \
 		--namespace observability \
 		--version 6.55.0 \
-		-f manifests/global/otel-stack/loki-values.yaml
+		-f manifests/global/otel-stack/loki-values.yaml \
+		-f $(OTEL_PROFILE_DIR)/loki-values.yaml
 	$(HELM) upgrade -i tempo grafana-community/tempo \
 		--namespace observability \
 		--version 2.0.0 \
-		-f manifests/global/otel-stack/tempo-values.yaml
+		-f manifests/global/otel-stack/tempo-values.yaml \
+		-f $(OTEL_PROFILE_DIR)/tempo-values.yaml
 	$(HELM) upgrade -i otel-collector-metrics open-telemetry/opentelemetry-collector \
 		--namespace observability \
 		--version 0.147.0 \
 		--reset-values \
-		-f manifests/global/otel-stack/otel-collector-metrics-values.yaml
+		-f manifests/global/otel-stack/otel-collector-metrics-values.yaml \
+		-f $(OTEL_PROFILE_DIR)/otel-collector-metrics-values.yaml
 	$(HELM) upgrade -i otel-collector-logs open-telemetry/opentelemetry-collector \
 		--namespace observability \
 		--version 0.147.0 \
 		--reset-values \
-		-f manifests/global/otel-stack/otel-collector-logs-values.yaml
+		-f manifests/global/otel-stack/otel-collector-logs-values.yaml \
+		-f $(OTEL_PROFILE_DIR)/otel-collector-logs-values.yaml
 	$(HELM) upgrade -i otel-collector-traces open-telemetry/opentelemetry-collector \
 		--namespace observability \
 		--version 0.147.0 \
 		--reset-values \
-		-f manifests/global/otel-stack/otel-collector-traces-values.yaml
+		-f manifests/global/otel-stack/otel-collector-traces-values.yaml \
+		-f $(OTEL_PROFILE_DIR)/otel-collector-traces-values.yaml
 
 apply-global:
 	$(KUBECTL) apply -f manifests/global/10-gateway.yaml

@@ -1,6 +1,8 @@
 tempo:
   tag: "2.10.2"
   reportingEnabled: false
+  metricsGenerator:
+    enabled: false
   retention: 24h
 
 persistence:

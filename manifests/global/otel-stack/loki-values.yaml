@@ -1,10 +1,19 @@
 loki:
   auth_enabled: false
   commonConfig:
+    path_prefix: /var/loki
     replication_factor: 1
   storage:
     type: filesystem
-  useTestSchema: true
+  schemaConfig:
+    configs:
+      - from: 2024-04-01
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
 
 deploymentMode: SingleBinary
 
@@ -21,6 +30,18 @@ backend:
   replicas: 0
 
 test:
+  enabled: false
+
+chunksCache:
+  enabled: false
+
+resultsCache:
+  enabled: false
+
+memcached:
+  enabled: false
+
+memcachedExporter:
   enabled: false
 
 monitoring:
