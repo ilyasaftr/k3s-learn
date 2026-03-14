@@ -889,10 +889,10 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(envoy_cluster_ext_authz_denied_total[5m])",
+          "expr": "rate(envoy_cluster_ext_authz_denied_total[5m]) or on (envoy_cluster_name) sum(0 * max_over_time(envoy_cluster_upstream_rq_total{envoy_cluster_name!=\"admin_port_cluster\"}[5m])) by (envoy_cluster_name)",
           "hide": false,
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "denied - {{envoy_cluster_name}}",
           "range": true,
           "refId": "A"
         },
@@ -902,10 +902,10 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(envoy_cluster_ext_authz_error_total[5m])",
+          "expr": "rate(envoy_cluster_ext_authz_error_total[5m]) or on (envoy_cluster_name) sum(0 * max_over_time(envoy_cluster_upstream_rq_total{envoy_cluster_name!=\"admin_port_cluster\"}[5m])) by (envoy_cluster_name)",
           "hide": false,
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "error - {{envoy_cluster_name}}",
           "range": true,
           "refId": "B"
         }
@@ -1123,7 +1123,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(envoy_upstream_cx_connect_fail[5m])) by (envoy_cluster_name)",
+          "expr": "sum(rate(envoy_upstream_cx_connect_fail[5m])) by (envoy_cluster_name) or on (envoy_cluster_name) sum(0 * max_over_time(envoy_cluster_upstream_rq_total{envoy_cluster_name!=\"admin_port_cluster\"}[5m])) by (envoy_cluster_name)",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
