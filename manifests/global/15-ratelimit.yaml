@@ -74,6 +74,8 @@ spec:
       containers:
         - name: ratelimit
           image: envoyproxy/ratelimit:master
+          command:
+            - /bin/ratelimit
           env:
             - name: REDIS_SOCKET_TYPE
               value: tcp
@@ -143,3 +145,4 @@ spec:
     domain: api-gateway
     timeout: 100ms
     failOpen: true
+    xRateLimitHeaders: DraftVersion03
