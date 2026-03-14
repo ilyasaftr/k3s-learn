@@ -17,7 +17,7 @@ spec:
             namespace: observability
             port: 4317
   tracing:
-    randomSampling: 100
+    randomSampling: 10
     provider:
       openTelemetry:
         grpcService:

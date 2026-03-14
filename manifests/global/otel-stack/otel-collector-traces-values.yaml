@@ -24,7 +24,11 @@ alternateConfig:
     memory_limiter:
       check_interval: 2s
       limit_mib: 256
-    batch: {}
+      spike_limit_mib: 64
+    batch:
+      timeout: 5s
+      send_batch_size: 512
+      send_batch_max_size: 1024
   exporters:
     otlp:
       endpoint: tempo.observability.svc.cluster.local:4317
