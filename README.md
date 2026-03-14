@@ -5,8 +5,8 @@ This repo now uses an OTel-first observability stack for kgateway.
 Primary signals:
 
 - Metrics: Prometheus (remote-write receiver)
-- Logs: Loki
-- Traces: Tempo
+- Logs: Loki (optional)
+- Traces: Tempo (optional)
 - Collection/Pipeline: OpenTelemetry Collector (metrics, logs, traces)
 - Visualization: Grafana
 
@@ -23,11 +23,11 @@ Clients
 
 Observability namespace
   - kube-prometheus-stack (Prometheus + Grafana)
-  - Loki
-  - Tempo
+  - Loki (optional)
+  - Tempo (optional)
   - otel-collector-metrics
-  - otel-collector-logs
-  - otel-collector-traces
+  - otel-collector-logs (optional)
+  - otel-collector-traces (optional)
 
 Telemetry flow
   - Gateway metrics + app /metrics -> otel-collector-metrics -> Prometheus remote write
@@ -139,12 +139,23 @@ kubectl wait --for=condition=Available -n cert-manager deploy/cert-manager-cainj
 
 ## Install OTel Stack
 
-Install Prometheus/Grafana + Loki + Tempo + three OTel collectors.
+Install Prometheus/Grafana and the metrics collector by default. Loki, Tempo, and the log/trace collectors are optional.
 
 The default profile is `single-node-prod-small`, which is the low-memory production profile for k3s:
 
 ```bash
 make install-otel-stack
+```
+
+This default installs:
+
+- kube-prometheus-stack
+- `otel-collector-metrics`
+
+To also install Loki, Tempo, and the log/trace collectors:
+
+```bash
+make install-otel-stack OTEL_ENABLE_LOGS_TRACES=true
 ```
 
 To install a different profile in the future:
@@ -153,9 +164,9 @@ To install a different profile in the future:
 make install-otel-stack OTEL_PROFILE=single-node-prod-small
 ```
 
-This installs all observability components in namespace `observability`.
+This installs the selected observability components in namespace `observability`.
 
-The `single-node-prod-small` profile currently does all of the following:
+The `single-node-prod-small` profile currently does all of the following when logs/traces are enabled:
 
 - keeps Prometheus, Grafana, Alertmanager, Loki, Tempo, and the three OTel collectors
 - enables PVC-backed storage for Prometheus, Loki, Tempo, and Alertmanager
@@ -172,6 +183,8 @@ make apply-app APP=podinfo-2
 ```
 
 `make apply-global` now installs the shared Redis + `envoyproxy/ratelimit` backend in `kgateway-system` and the `GatewayExtension` that `podinfo` uses for global rate limiting.
+
+By default, `make apply-global` does not apply the gateway OTLP log/trace policy or the Loki/Tempo Grafana datasources. Re-enable them with `OTEL_ENABLE_LOGS_TRACES=true`.
 
 If you use the wildcard cert flow:
 
@@ -193,6 +206,8 @@ kubectl get pvc -n observability
 
 - `redis` and `ratelimit` are up in `kgateway-system`
 - `GatewayExtension/global-ratelimit` exists
+
+If you enable logs/traces, `make verify-global OTEL_ENABLE_LOGS_TRACES=true` also checks the gateway OTLP policy objects.
 
 ### Verify TLS and apps
 
@@ -232,9 +247,14 @@ Then check:
 
 ```bash
 kubectl get pods -n observability
+kubectl logs -n observability deploy/otel-collector-metrics --tail=50
+```
+
+If logs/traces are enabled, also check:
+
+```bash
 kubectl logs -n observability deploy/otel-collector-logs --tail=50
 kubectl logs -n observability deploy/otel-collector-traces --tail=50
-kubectl logs -n observability deploy/otel-collector-metrics --tail=50
 ```
 
 Get the local Grafana admin password:
@@ -247,10 +267,13 @@ kubectl get secret -n observability kube-prometheus-stack-grafana \
 In Grafana, verify:
 
 - Prometheus datasource has `kgateway-gateways`, `kgateway-control-plane`, and `demo-app-metrics` series
-- Loki has gateway access logs
-- Tempo shows gateway traces
 - Open the vendored upstream dashboards: `Envoy` and `Kgateway Operations`
 - These dashboards are checked into this repo from the kgateway docs so Grafana does not depend on the unstable docs-hosted `.../main/.../*.json` URLs at runtime
+
+If logs/traces are enabled:
+
+- Loki has gateway access logs
+- Tempo shows gateway traces
 - Use `kgateway Log Overview` for OTLP gateway logs with the selector `{service_name="shared-gateway.kgateway-system"}`
 
 ## Important Behavior
@@ -263,9 +286,10 @@ In Grafana, verify:
 - `podinfo-2` and other routes on `shared-gateway` are not rate-limited by this config.
 - `failOpen: true` is set on `GatewayExtension/global-ratelimit`, so if Redis or the ratelimit service is down, `podinfo` traffic continues and only the protection is bypassed temporarily.
 - App `/metrics` scraping is still retained (via OTel metrics collector), so app-level operational visibility remains.
+- Loki, Tempo, and the OTLP log/trace collectors are disabled by default in the repo flow, but can be re-enabled later with `OTEL_ENABLE_LOGS_TRACES=true`.
 - `shared-gateway` now gets explicit Envoy resource requests and limits via `GatewayParameters`.
 - The kgateway control plane now gets explicit resource requests and limits via the Helm values file.
-- Tempo remains gateway-level tracing only in this profile.
+- When enabled, Tempo remains gateway-level tracing only in this profile.
 - The low-memory defaults are tuned for single-node durability, not HA.
 - Multi-node readiness is handled by the profile layout; do not scale this profile into HA by only increasing replica counts.
 
