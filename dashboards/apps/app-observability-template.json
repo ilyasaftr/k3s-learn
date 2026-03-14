@@ -876,15 +876,14 @@
       },
       {
         "current": {
-          "selected": true,
-          "text": "demo",
-          "value": "demo"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values(kube_deployment_labels, namespace)",
+        "definition": "label_values(kube_namespace_status_phase{job=\"kube-state-metrics\"}, namespace)",
         "hide": 0,
         "includeAll": false,
         "label": "Namespace",
@@ -893,10 +892,10 @@
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(kube_deployment_labels, namespace)",
+          "query": "label_values(kube_namespace_status_phase{job=\"kube-state-metrics\"}, namespace)",
           "refId": "NamespaceVarQuery"
         },
-        "refresh": 1,
+        "refresh": 2,
         "regex": "",
         "skipUrlSync": false,
         "sort": 1,
@@ -904,15 +903,14 @@
       },
       {
         "current": {
-          "selected": true,
-          "text": "podinfo",
-          "value": "podinfo"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values(kube_deployment_labels{namespace=\"$namespace\"}, deployment)",
+        "definition": "label_values(kube_deployment_status_replicas_ready{job=\"kube-state-metrics\", namespace=\"$namespace\"}, deployment)",
         "hide": 0,
         "includeAll": false,
         "label": "App",
@@ -921,10 +919,10 @@
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(kube_deployment_labels{namespace=\"$namespace\"}, deployment)",
+          "query": "label_values(kube_deployment_status_replicas_ready{job=\"kube-state-metrics\", namespace=\"$namespace\"}, deployment)",
           "refId": "AppVarQuery"
         },
-        "refresh": 1,
+        "refresh": 2,
         "regex": "",
         "skipUrlSync": false,
         "sort": 1,
