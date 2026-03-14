@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anubis-podinfo-2
+  namespace: demo
+  labels:
+    app: anubis-podinfo-2
+    app.kubernetes.io/name: anubis-podinfo-2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: anubis-podinfo-2
+      app.kubernetes.io/name: anubis-podinfo-2
+  template:
+    metadata:
+      labels:
+        app: anubis-podinfo-2
+        app.kubernetes.io/name: anubis-podinfo-2
+    spec:
+      containers:
+        - name: anubis
+          image: ghcr.io/techarohq/anubis:v1.25.0
+          ports:
+            - name: http
+              containerPort: 8923
+          env:
+            - name: BIND
+              value: ":8923"
+            - name: METRICS_BIND
+              value: ":9090"
+            - name: TARGET
+              value: "http://podinfo-2.demo.svc.cluster.local:9898"
+            - name: COOKIE_DOMAIN
+              value: "klawu.com"
+            - name: DIFFICULTY
+              value: "4"
+            - name: SLOG_LEVEL
+              value: "INFO"
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anubis-podinfo-2
+  namespace: demo
+  labels:
+    app: anubis-podinfo-2
+    app.kubernetes.io/name: anubis-podinfo-2
+spec:
+  selector:
+    app: anubis-podinfo-2
+  ports:
+    - name: http
+      port: 8923
+      targetPort: http

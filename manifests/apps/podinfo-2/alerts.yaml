@@ -34,7 +34,7 @@ spec:
             runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
 
         - alert: Podinfo2Upstream5xxRate
-          expr: sum(rate(envoy_cluster_upstream_rq_xx{job="kgateway-gateways",envoy_cluster_name=~"^kube_demo_podinfo-2_[0-9]+$",envoy_response_code_class="5"}[5m])) > 0.5
+          expr: sum(rate(envoy_cluster_upstream_rq_xx{job="kgateway-gateways",envoy_cluster_name=~"^kube_demo_anubis-podinfo-2_[0-9]+$",envoy_response_code_class="5"}[5m])) > 0.5
           for: 10m
           labels:
             severity: warning
@@ -50,7 +50,7 @@ spec:
             1000 * histogram_quantile(0.95,
               sum(rate(envoy_cluster_upstream_rq_time_bucket{
                 job="kgateway-gateways",
-                envoy_cluster_name=~"^kube_demo_podinfo-2_[0-9]+$"
+                envoy_cluster_name=~"^kube_demo_anubis-podinfo-2_[0-9]+$"
               }[5m])) by (le)
             ) > 500
           for: 10m

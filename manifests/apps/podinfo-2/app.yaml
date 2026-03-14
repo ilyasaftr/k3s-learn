@@ -80,5 +80,5 @@ spec:
     - "podinfo-2.klawu.com"
   rules:
     - backendRefs:
-        - name: podinfo-2
-          port: 9898
+        - name: anubis-podinfo-2
+          port: 8923

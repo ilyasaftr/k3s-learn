@@ -10,14 +10,15 @@ Primary signals:
 - Collection/Pipeline: OpenTelemetry Collector (metrics, logs, traces)
 - Visualization: Grafana
 
-App routing behavior is unchanged. `podinfo` and `podinfo-2` still run behind the shared kgateway Gateway API resources.
+App routing stays on the shared kgateway Gateway API resources, but `podinfo-2` is now fronted by Anubis before requests reach the app service.
 
 ## Architecture
 
 ```text
 Clients
   -> shared-gateway (kgateway / Envoy)
-      -> podinfo / podinfo-2 (demo namespace)
+      -> podinfo (demo namespace)
+      -> anubis-podinfo-2 -> podinfo-2 (demo namespace)
       -> global ratelimit service (for podinfo only)
           -> Redis counters (kgateway-system)
 
@@ -184,6 +185,14 @@ make apply-app APP=podinfo-2
 
 `make apply-global` now installs the shared Redis + `envoyproxy/ratelimit` backend in `kgateway-system` and the `GatewayExtension` that `podinfo` uses for global rate limiting.
 
+`make apply-app APP=podinfo-2` now also deploys Anubis in `demo` and repoints the public `HTTPRoute` so `podinfo-2.klawu.com` is challenged before traffic reaches the original `podinfo-2` service. The original `podinfo-2` ClusterIP service remains available for in-cluster access and metrics scraping.
+
+The initial Anubis rollout is conservative:
+
+- all public paths on `podinfo-2.klawu.com` go through Anubis first
+- there are no public bypasses for `/healthz` or `/metrics`
+- the original `podinfo-2` service still handles in-cluster app traffic and Prometheus scraping
+
 By default, `make apply-global` does not apply the gateway OTLP log/trace policy or the Loki/Tempo Grafana datasources. Re-enable them with `OTEL_ENABLE_LOGS_TRACES=true`.
 
 If you use the wildcard cert flow:
@@ -218,6 +227,10 @@ make verify-app APP=podinfo-2
 ```
 
 `make verify-app APP=podinfo` now checks the route-scoped `TrafficPolicy` too.
+
+`make verify-app APP=podinfo-2` also checks the `anubis-podinfo-2` deployment and service.
+
+To revert Anubis later, change the backend in [manifests/apps/podinfo-2/app.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/apps/podinfo-2/app.yaml) back from `anubis-podinfo-2:8923` to `podinfo-2:9898`, then remove [manifests/apps/podinfo-2/anubis.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/apps/podinfo-2/anubis.yaml) from the apply flow.
 
 ### Verify telemetry with traffic
 
