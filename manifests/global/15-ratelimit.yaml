@@ -93,6 +93,8 @@ spec:
               value: ratelimit
             - name: RUNTIME_APPDIRECTORY
               value: config
+            - name: RUNTIME_IGNOREDOTFILES
+              value: "true"
           ports:
             - name: grpc
               containerPort: 8081
