@@ -6,10 +6,20 @@ OTEL_PROFILE ?= single-node-prod-small
 APP_DIR := manifests/apps/$(APP)
 OTEL_PROFILE_DIR := manifests/global/otel-stack/profiles/$(OTEL_PROFILE)
 
-.PHONY: apply-issuer-example install-optional-tailscale-operator install-otel-stack apply-global apply-app apply-all apply-optional-tailscale-grafana verify-global verify-tls verify-otel-stack verify-app verify-all verify-optional-tailscale-grafana clean-app clean-global clean-otel-stack clean-optional-tailscale-grafana clean-all check-app
+.PHONY: apply-issuer-example install-kgateway install-optional-tailscale-operator install-otel-stack apply-global apply-app apply-all apply-optional-tailscale-grafana verify-global verify-tls verify-otel-stack verify-app verify-all verify-optional-tailscale-grafana clean-app clean-global clean-otel-stack clean-optional-tailscale-grafana clean-all check-app
 
 apply-issuer-example:
 	$(KUBECTL) apply -f manifests/global/00-clusterissuer-cloudflare.example.yaml
+
+install-kgateway:
+	$(HELM) upgrade -i --create-namespace --namespace kgateway-system \
+		--version v2.2.1 \
+		-f manifests/global/kgateway-values.yaml \
+		kgateway-crds oci://cr.kgateway.dev/kgateway-dev/charts/kgateway-crds
+	$(HELM) upgrade -i -n kgateway-system \
+		--version v2.2.1 \
+		-f manifests/global/kgateway-values.yaml \
+		kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway
 
 install-optional-tailscale-operator:
 	@test -n "$$TS_OAUTH_CLIENT_ID" || (echo "TS_OAUTH_CLIENT_ID is required" && exit 1)

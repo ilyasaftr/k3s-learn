@@ -113,19 +113,17 @@ kubectl get crd | grep gateway.networking.k8s.io
 ### 3) kgateway
 
 ```bash
-export KGW_VERSION=v2.2.1
-
-helm upgrade -i --create-namespace --namespace kgateway-system \
-  --version ${KGW_VERSION} \
-  kgateway-crds oci://cr.kgateway.dev/kgateway-dev/charts/kgateway-crds
-
-helm upgrade -i -n kgateway-system \
-  --version ${KGW_VERSION} \
-  kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway
+make install-kgateway
 
 kubectl -n kgateway-system rollout status deploy/kgateway --timeout=180s
 kubectl get gatewayclass kgateway
 ```
+
+The kgateway install uses [kgateway-values.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/kgateway-values.yaml) to:
+
+- give the kgateway control plane explicit memory requests and limits
+- point the default `kgateway` `GatewayClass` at the repo-managed `shared-gateway-params` `GatewayParameters`
+- ensure the generated `shared-gateway` proxy is not left in `BestEffort` QoS
 
 ### 4) cert-manager
 
@@ -225,6 +223,8 @@ In Grafana, verify:
 - App-side OTel instrumentation is not required for v1.
 - `podinfo` works with gateway-generated logs/traces immediately.
 - App `/metrics` scraping is still retained (via OTel metrics collector), so app-level operational visibility remains.
+- `shared-gateway` now gets explicit Envoy resource requests and limits via `GatewayParameters`.
+- The kgateway control plane now gets explicit resource requests and limits via the Helm values file.
 - Tempo remains gateway-level tracing only in this profile.
 - The low-memory defaults are tuned for single-node durability, not HA.
 - Multi-node readiness is handled by the profile layout; do not scale this profile into HA by only increasing replica counts.

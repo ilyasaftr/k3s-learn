@@ -1,3 +1,21 @@
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayParameters
+metadata:
+  name: shared-gateway-params
+  namespace: kgateway-system
+spec:
+  kube:
+    deployment:
+      replicas: 1
+    envoyContainer:
+      resources:
+        requests:
+          cpu: 500m
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -5,6 +23,11 @@ metadata:
   namespace: kgateway-system
 spec:
   gatewayClassName: kgateway
+  infrastructure:
+    parametersRef:
+      group: gateway.kgateway.dev
+      kind: GatewayParameters
+      name: shared-gateway-params
   listeners:
     - name: https
       hostname: "*.klawu.com"
