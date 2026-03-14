@@ -1,0 +1,22 @@
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: podinfo-global-rate-limit
+  namespace: demo
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: podinfo
+  rateLimit:
+    global:
+      extensionRef:
+        name: global-ratelimit
+        namespace: kgateway-system
+      descriptors:
+        - entries:
+            - type: Generic
+              generic:
+                key: service
+                value: podinfo
+            - type: RemoteAddress

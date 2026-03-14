@@ -18,6 +18,8 @@ App routing behavior is unchanged. `podinfo` and `podinfo-2` still run behind th
 Clients
   -> shared-gateway (kgateway / Envoy)
       -> podinfo / podinfo-2 (demo namespace)
+      -> global ratelimit service (for podinfo only)
+          -> Redis counters (kgateway-system)
 
 Observability namespace
   - kube-prometheus-stack (Prometheus + Grafana)
@@ -39,6 +41,7 @@ Telemetry flow
 manifests/
   global/
     10-gateway.yaml
+    15-ratelimit.yaml
     20-observability.yaml
     21-otel-policies.yaml
     30-alerts-global.yaml
@@ -168,6 +171,8 @@ make apply-app APP=podinfo
 make apply-app APP=podinfo-2
 ```
 
+`make apply-global` now installs the shared Redis + `envoyproxy/ratelimit` backend in `kgateway-system` and the `GatewayExtension` that `podinfo` uses for global rate limiting.
+
 If you use the wildcard cert flow:
 
 ```bash
@@ -184,6 +189,11 @@ make verify-global
 kubectl get pvc -n observability
 ```
 
+`make verify-global` also checks that:
+
+- `redis` and `ratelimit` are up in `kgateway-system`
+- `GatewayExtension/global-ratelimit` exists
+
 ### Verify TLS and apps
 
 ```bash
@@ -192,6 +202,8 @@ make verify-app APP=podinfo
 make verify-app APP=podinfo-2
 ```
 
+`make verify-app APP=podinfo` now checks the route-scoped `TrafficPolicy` too.
+
 ### Verify telemetry with traffic
 
 Generate traffic:
@@ -199,6 +211,22 @@ Generate traffic:
 ```bash
 for i in {1..50}; do curl -sk --resolve podinfo.klawu.com:443:<LB_IP> https://podinfo.klawu.com/ >/dev/null; done
 ```
+
+To confirm global rate limiting for `podinfo`, run a short burst from one client IP and count the response codes:
+
+```bash
+for i in {1..50}; do
+  curl -sk -o /dev/null -w "%{http_code}\n" \
+    --resolve podinfo.klawu.com:443:<LB_IP> \
+    https://podinfo.klawu.com/
+done | sort | uniq -c
+```
+
+Expected behavior:
+
+- some requests return `200`
+- excess requests return `429`
+- `podinfo-2` is unaffected because no global rate-limit policy is attached to its route
 
 Then check:
 
@@ -229,6 +257,11 @@ In Grafana, verify:
 
 - App-side OTel instrumentation is not required for v1.
 - `podinfo` works with gateway-generated logs/traces immediately.
+- `podinfo` now also uses global rate limiting through `envoyproxy/ratelimit` with Redis-backed shared counters.
+- The `podinfo` global limit is `10 requests/second` per client IP, using `RemoteAddress` plus a static `service=podinfo` descriptor.
+- The limit is shared across all `shared-gateway` replicas, so scaling the gateway does not double the effective `podinfo` quota.
+- `podinfo-2` and other routes on `shared-gateway` are not rate-limited by this config.
+- `failOpen: true` is set on `GatewayExtension/global-ratelimit`, so if Redis or the ratelimit service is down, `podinfo` traffic continues and only the protection is bypassed temporarily.
 - App `/metrics` scraping is still retained (via OTel metrics collector), so app-level operational visibility remains.
 - `shared-gateway` now gets explicit Envoy resource requests and limits via `GatewayParameters`.
 - The kgateway control plane now gets explicit resource requests and limits via the Helm values file.

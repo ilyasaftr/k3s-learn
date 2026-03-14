@@ -75,6 +75,7 @@ install-otel-stack:
 
 apply-global:
 	$(KUBECTL) apply -f manifests/global/10-gateway.yaml
+	$(KUBECTL) apply -f manifests/global/15-ratelimit.yaml
 	$(KUBECTL) apply -f manifests/global/20-observability.yaml
 	$(KUBECTL) apply -f manifests/global/21-otel-policies.yaml
 	$(KUBECTL) apply -f manifests/global/30-alerts-global.yaml
@@ -85,6 +86,7 @@ check-app:
 
 apply-app: check-app
 	$(KUBECTL) apply -f $(APP_DIR)/app.yaml
+	@if [ -f $(APP_DIR)/rate-limit.yaml ]; then $(KUBECTL) apply -f $(APP_DIR)/rate-limit.yaml; fi
 	$(KUBECTL) apply -f $(APP_DIR)/observability.yaml
 	$(KUBECTL) apply -f $(APP_DIR)/alerts.yaml
 
@@ -99,6 +101,8 @@ verify-global:
 	$(KUBECTL) get gateway -n kgateway-system
 	$(KUBECTL) wait -n kgateway-system --for=condition=Programmed gateway/shared-gateway --timeout=180s
 	$(KUBECTL) wait -n kgateway-system --for=jsonpath='{.status.conditions[?(@.type=="Accepted")].status}'=True gateway/shared-gateway --timeout=180s
+	$(KUBECTL) get deploy,svc -n kgateway-system | grep -E 'redis|ratelimit'
+	$(KUBECTL) get gatewayextension global-ratelimit -n kgateway-system
 	$(KUBECTL) get httplistenerpolicy -n kgateway-system
 	$(KUBECTL) get referencegrant -n observability
 	$(KUBECTL) get prometheusrule -n observability
@@ -120,6 +124,7 @@ verify-otel-stack:
 
 verify-app: check-app
 	$(KUBECTL) get deployment,svc,httproute -n demo | grep $(APP)
+	@if [ -f $(APP_DIR)/rate-limit.yaml ]; then $(KUBECTL) get trafficpolicy -n demo | grep $(APP); fi
 	$(KUBECTL) get prometheusrule -n observability | grep $(APP)
 	$(KUBECTL) get networkpolicy -n demo | grep $(APP)
 
@@ -138,6 +143,7 @@ verify-optional-tailscale-grafana:
 clean-app: check-app
 	-$(KUBECTL) delete -f $(APP_DIR)/alerts.yaml
 	-$(KUBECTL) delete -f $(APP_DIR)/observability.yaml
+	@if [ -f $(APP_DIR)/rate-limit.yaml ]; then $(KUBECTL) delete -f $(APP_DIR)/rate-limit.yaml; fi
 	-$(KUBECTL) delete -f $(APP_DIR)/app.yaml
 
 clean-global:
@@ -145,6 +151,7 @@ clean-global:
 	-$(KUBECTL) delete -f manifests/global/30-alerts-global.yaml
 	-$(KUBECTL) delete -f manifests/global/21-otel-policies.yaml
 	-$(KUBECTL) delete -f manifests/global/20-observability.yaml
+	-$(KUBECTL) delete -f manifests/global/15-ratelimit.yaml
 	-$(KUBECTL) delete -f manifests/global/10-gateway.yaml
 
 clean-otel-stack:
