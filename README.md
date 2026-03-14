@@ -209,6 +209,13 @@ kubectl logs -n observability deploy/otel-collector-traces --tail=50
 kubectl logs -n observability deploy/otel-collector-metrics --tail=50
 ```
 
+Get the local Grafana admin password:
+
+```bash
+kubectl get secret -n observability kube-prometheus-stack-grafana \
+  -o jsonpath='{.data.admin-password}' | base64 -d && echo
+```
+
 In Grafana, verify:
 
 - Prometheus datasource has `kgateway-gateways`, `kgateway-control-plane`, and `demo-app-metrics` series
