@@ -79,6 +79,12 @@ spec:
   hostnames:
     - "podinfo-2.klawu.com"
   rules:
-    - backendRefs:
+    - filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-real-ip
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+      backendRefs:
         - name: anubis-podinfo-2
           port: 8923
