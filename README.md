@@ -200,6 +200,8 @@ This repo now applies a global Coraza WAF policy on `shared-gateway` using Envoy
 - Rules: `@recommended-conf` + baseline CRS (`@crs-setup-conf`, `@owasp_crs/*.conf`)
 - Module source: pinned OCI digest (`ghcr.io/corazawaf/coraza-proxy-wasm@sha256:...`)
 
+`podinfo` also has a route-specific override policy in [waf.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/apps/podinfo/waf.yaml) with `SecRuleEngine On`, so blocking is enabled only for `podinfo` while `podinfo-2` remains under global detection mode.
+
 The policy is defined in [16-waf-coraza.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/16-waf-coraza.yaml).
 
 Verify it is attached:
@@ -217,6 +219,14 @@ curl -sk --resolve podinfo.klawu.com:443:<LB_IP> \
 
 curl -sk --resolve podinfo-2.klawu.com:443:<LB_IP> \
   "https://podinfo-2.klawu.com/?id=1%27%20OR%20%271%27=%271"
+```
+
+For `podinfo` route-level blocking mode, malicious payloads should return a blocked response:
+
+```bash
+curl -sk -o /dev/null -w "%{http_code}\n" \
+  --resolve podinfo.klawu.com:443:<LB_IP> \
+  "https://podinfo.klawu.com/?q=<script>alert(1)</script>"
 ```
 
 Rollback:

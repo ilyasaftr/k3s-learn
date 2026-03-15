@@ -89,6 +89,7 @@ apply-app: check-app
 	$(KUBECTL) apply -f $(APP_DIR)/app.yaml
 	@if [ -f $(APP_DIR)/anubis.yaml ]; then $(KUBECTL) apply -f $(APP_DIR)/anubis.yaml; fi
 	@if [ -f $(APP_DIR)/rate-limit.yaml ]; then $(KUBECTL) apply -f $(APP_DIR)/rate-limit.yaml; fi
+	@if [ -f $(APP_DIR)/waf.yaml ]; then $(KUBECTL) apply -f $(APP_DIR)/waf.yaml; fi
 	$(KUBECTL) apply -f $(APP_DIR)/observability.yaml
 	$(KUBECTL) apply -f $(APP_DIR)/alerts.yaml
 
@@ -130,6 +131,7 @@ verify-app: check-app
 	$(KUBECTL) get deployment,svc,httproute -n demo | grep $(APP)
 	@if [ -f $(APP_DIR)/anubis.yaml ]; then $(KUBECTL) get deployment,svc -n demo | grep anubis-$(APP); fi
 	@if [ -f $(APP_DIR)/rate-limit.yaml ]; then $(KUBECTL) get backendtrafficpolicy -n demo | grep $(APP); fi
+	@if [ -f $(APP_DIR)/waf.yaml ]; then $(KUBECTL) get envoyextensionpolicy -n demo | grep $(APP); fi
 	$(KUBECTL) get prometheusrule -n observability | grep $(APP)
 	$(KUBECTL) get networkpolicy -n demo | grep $(APP)
 
@@ -148,6 +150,7 @@ verify-optional-tailscale-grafana:
 clean-app: check-app
 	-$(KUBECTL) delete -f $(APP_DIR)/alerts.yaml
 	-$(KUBECTL) delete -f $(APP_DIR)/observability.yaml
+	@if [ -f $(APP_DIR)/waf.yaml ]; then $(KUBECTL) delete -f $(APP_DIR)/waf.yaml; fi
 	@if [ -f $(APP_DIR)/rate-limit.yaml ]; then $(KUBECTL) delete -f $(APP_DIR)/rate-limit.yaml; fi
 	@if [ -f $(APP_DIR)/anubis.yaml ]; then $(KUBECTL) delete -f $(APP_DIR)/anubis.yaml; fi
 	-$(KUBECTL) delete -f $(APP_DIR)/app.yaml
