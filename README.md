@@ -1,13 +1,13 @@
-# k3s-learn (Envoy Gateway + OTel Stack)
+# k3s-learn (Envoy Gateway + Prometheus/Grafana)
 
-This repo now uses Envoy Gateway as the shared public edge, with an OTel-first metrics stack for operations.
+This repo now uses Envoy Gateway as the shared public edge, with Prometheus and Grafana as the primary observability path.
 
 Primary signals:
 
-- Metrics: Prometheus (remote-write receiver)
+- Metrics: Prometheus
 - Logs: Loki (optional)
 - Traces: Tempo (optional)
-- Collection/Pipeline: OpenTelemetry Collector (metrics, logs, traces)
+- Collection/Pipeline: Prometheus direct scrape for metrics, OpenTelemetry Collector for optional logs/traces
 - Visualization: Grafana
 
 App routing stays on the shared Envoy Gateway resources, and `podinfo-2` is fronted by Anubis before requests reach the app service.
@@ -25,12 +25,13 @@ Observability namespace
   - kube-prometheus-stack (Prometheus + Grafana)
   - Loki (optional)
   - Tempo (optional)
-  - otel-collector-metrics
   - otel-collector-logs (optional)
   - otel-collector-traces (optional)
 
 Telemetry flow
-  - Gateway metrics + app /metrics -> otel-collector-metrics -> Prometheus remote write
+  - Envoy Gateway controller metrics -> Prometheus
+  - Envoy proxy metrics -> Prometheus
+  - App /metrics -> Prometheus
   - Gateway access logs and traces are intentionally not wired in v1 of the Envoy Gateway migration
 ```
 
@@ -48,7 +49,6 @@ manifests/
       kube-prometheus-stack-values.yaml
       loki-values.yaml
       tempo-values.yaml
-      otel-collector-metrics-values.yaml
       otel-collector-logs-values.yaml
       otel-collector-traces-values.yaml
   apps/
@@ -135,9 +135,9 @@ kubectl wait --for=condition=Available -n cert-manager deploy/cert-manager-webho
 kubectl wait --for=condition=Available -n cert-manager deploy/cert-manager-cainjector --timeout=180s
 ```
 
-## Install OTel Stack
+## Install Observability Stack
 
-Install Prometheus/Grafana and the metrics collector by default. Loki, Tempo, and the log/trace collectors are optional.
+Install Prometheus/Grafana by default. Loki, Tempo, and the log/trace collectors are optional.
 
 The default profile is `single-node-prod-small`, which is the low-memory production profile for k3s:
 
@@ -148,7 +148,6 @@ make install-otel-stack
 This default installs:
 
 - kube-prometheus-stack
-- `otel-collector-metrics`
 
 To also install Loki, Tempo, and the log/trace collectors:
 
@@ -166,7 +165,7 @@ This installs the selected observability components in namespace `observability`
 
 The `single-node-prod-small` profile currently does all of the following when logs/traces are enabled:
 
-- keeps Prometheus, Grafana, Alertmanager, Loki, Tempo, and the three OTel collectors
+- keeps Prometheus, Grafana, Alertmanager, Loki, Tempo, and the two optional OTel collectors
 - enables PVC-backed storage for Prometheus, Loki, Tempo, and Alertmanager
 - applies explicit memory requests and limits to the core monitoring pods
 - reduces Prometheus retention to `72h` and Tempo retention to `24h`
@@ -180,7 +179,7 @@ make apply-app APP=podinfo
 make apply-app APP=podinfo-2
 ```
 
-`make apply-global` now installs the shared Envoy Gateway resources in `gateway-system` and the Redis backend that `podinfo` uses for route-scoped global rate limiting.
+`make apply-global` now installs the shared Envoy Gateway resources in `gateway-system`, the Redis backend that `podinfo` uses for route-scoped global rate limiting, direct Prometheus scrape monitors, and the vendored official Envoy Gateway Grafana dashboards.
 
 `make apply-app APP=podinfo-2` now also deploys Anubis in `demo` and repoints the public `HTTPRoute` so `podinfo-2.klawu.com` is challenged before traffic reaches the original `podinfo-2` service. The original `podinfo-2` ClusterIP service remains available for in-cluster access and metrics scraping.
 
@@ -190,7 +189,7 @@ The initial Anubis rollout is conservative:
 - there are no public bypasses for `/healthz` or `/metrics`
 - the original `podinfo-2` service still handles in-cluster app traffic and Prometheus scraping
 
-The first Envoy Gateway migration keeps metrics and alerts only. Gateway OTLP access logs and tracing are intentionally not configured in v1.
+The current Envoy Gateway setup uses direct Prometheus scraping for metrics. Gateway OTLP access logs and tracing are still intentionally not configured in v1.
 
 If you use the wildcard cert flow:
 
@@ -213,6 +212,11 @@ kubectl get pvc -n observability
 - Envoy Gateway is running in `gateway-system`
 - `redis` is up in `gateway-system`
 - `shared-gateway` is accepted and programmed
+
+`make verify-otel-stack` now also checks that:
+
+- direct `PodMonitor` resources exist for the Envoy Gateway controller, Envoy proxy, and demo app metrics
+- vendored Grafana dashboard ConfigMaps are present in `observability`
 
 ### Verify TLS and apps
 
@@ -256,7 +260,7 @@ Then check:
 
 ```bash
 kubectl get pods -n observability
-kubectl logs -n observability deploy/otel-collector-metrics --tail=50
+kubectl get podmonitor -n observability
 ```
 
 If logs/traces are enabled, also check:
@@ -275,7 +279,12 @@ kubectl get secret -n observability kube-prometheus-stack-grafana \
 
 In Grafana, verify:
 
-- Prometheus datasource has `envoy-gateway-proxy` and `demo-app-metrics` series
+- Prometheus datasource has `envoy-gateway-controller`, `envoy-gateway-proxy`, and `demo-app-metrics` series
+- the official dashboards are present:
+  - `Envoy Gateway Global`
+  - `Envoy Global`
+  - `Envoy Clusters`
+  - `Resources Monitor`
 - the shared and per-app alerts evaluate against those metrics
 
 ## Important Behavior
@@ -285,7 +294,7 @@ In Grafana, verify:
 - The `podinfo` global limit is `10 requests/second` per client IP.
 - The limit is shared across all `shared-gateway` replicas, so scaling the gateway does not double the effective `podinfo` quota.
 - `podinfo-2` and other routes on `shared-gateway` are not rate-limited by this config.
-- App `/metrics` scraping is still retained (via OTel metrics collector), so app-level operational visibility remains.
+- App `/metrics` scraping is retained through direct Prometheus scraping, so app-level operational visibility remains.
 - Loki, Tempo, and the OTLP log/trace collectors are disabled by default in the repo flow, but can be re-enabled later with `OTEL_ENABLE_LOGS_TRACES=true`.
 - `shared-gateway` now gets explicit Envoy resource requests and limits via `EnvoyProxy`.
 - The Envoy Gateway control plane now gets explicit resource requests and limits via the Helm values file.
@@ -335,7 +344,8 @@ kubectl get pods -n gateway-system
 - No metrics for gateway/apps:
 
 ```bash
-kubectl logs -n observability deploy/otel-collector-metrics --tail=200
+kubectl get podmonitor -n observability
+kubectl get configmap -n observability | grep grafana-dashboard-
 kubectl get pods -n gateway-system -l gateway.envoyproxy.io/owning-gateway-name=shared-gateway
 kubectl get pods -n demo -l app=podinfo
 kubectl get pods -n demo -l app=podinfo-2

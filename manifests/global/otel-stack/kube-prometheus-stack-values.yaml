@@ -1,5 +1,11 @@
 prometheus:
   prometheusSpec:
-    enableRemoteWriteReceiver: true
     podMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
+
+grafana:
+  sidecar:
+    dashboards:
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true

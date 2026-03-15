@@ -33,7 +33,7 @@ install-otel-stack:
 	@test -d $(OTEL_PROFILE_DIR) || (echo "Unknown OTEL_PROFILE=$(OTEL_PROFILE). Available: single-node-prod-small" && exit 1)
 	$(HELM) repo add prometheus-community https://prometheus-community.github.io/helm-charts
 	$(HELM) repo add grafana https://grafana.github.io/helm-charts
-	$(HELM) repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(HELM) repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts; fi
 	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(HELM) repo add grafana-community https://grafana-community.github.io/helm-charts; fi
 	$(HELM) repo update
 	$(HELM) upgrade -i kube-prometheus-stack prometheus-community/kube-prometheus-stack \
@@ -41,12 +41,7 @@ install-otel-stack:
 		--version 82.10.3 \
 		-f manifests/global/otel-stack/kube-prometheus-stack-values.yaml \
 		-f $(OTEL_PROFILE_DIR)/kube-prometheus-stack-values.yaml
-	$(HELM) upgrade -i otel-collector-metrics open-telemetry/opentelemetry-collector \
-		--namespace observability \
-		--version 0.147.0 \
-		--reset-values \
-		-f manifests/global/otel-stack/otel-collector-metrics-values.yaml \
-		-f $(OTEL_PROFILE_DIR)/otel-collector-metrics-values.yaml
+	-$(HELM) uninstall otel-collector-metrics -n observability
 	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then \
 		$(HELM) upgrade -i loki grafana/loki \
 			--namespace observability \
@@ -81,7 +76,8 @@ apply-global:
 	$(KUBECTL) apply -f manifests/global/10-gateway.yaml
 	$(KUBECTL) apply -f manifests/global/15-ratelimit.yaml
 	$(KUBECTL) apply -f manifests/global/20-observability.yaml
-	$(KUBECTL) delete -f manifests/global/21-otel-policies.yaml --ignore-not-found=true
+	$(KUBECTL) apply -f manifests/global/24-prometheus-monitors.yaml
+	./scripts/grafana_dashboards.sh apply
 	$(KUBECTL) apply -f manifests/global/30-alerts-global.yaml
 	$(KUBECTL) apply -f manifests/global/40-networkpolicy-gateway.yaml
 
@@ -121,8 +117,10 @@ verify-tls:
 verify-otel-stack:
 	$(HELM) list -n observability
 	$(KUBECTL) get pods -n observability
-	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(KUBECTL) get svc -n observability | grep -E 'loki|tempo|prometheus|grafana|otel-collector'; else $(KUBECTL) get svc -n observability | grep -E 'prometheus|grafana|otel-collector-metrics'; fi
-	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(KUBECTL) get deployment -n observability | grep -E 'otel-collector-(metrics|logs|traces)'; else $(KUBECTL) get deployment -n observability | grep -E 'otel-collector-metrics'; fi
+	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(KUBECTL) get svc -n observability | grep -E 'loki|tempo|prometheus|grafana|otel-collector-(logs|traces)'; else $(KUBECTL) get svc -n observability | grep -E 'prometheus|grafana'; fi
+	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(KUBECTL) get deployment -n observability | grep -E 'otel-collector-(logs|traces)'; fi
+	$(KUBECTL) get podmonitor -n observability | grep -E 'envoy-gateway-controller|envoy-gateway-proxy|demo-app-metrics'
+	./scripts/grafana_dashboards.sh verify
 	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(KUBECTL) get configmap grafana-otel-datasources -n observability; fi
 
 verify-app: check-app
@@ -155,7 +153,8 @@ clean-global:
 	-$(KUBECTL) delete -f manifests/global/40-networkpolicy-gateway.yaml
 	-$(KUBECTL) delete -f manifests/global/30-alerts-global.yaml
 	-$(KUBECTL) delete -f manifests/global/22-observability-logs-traces.yaml
-	-$(KUBECTL) delete -f manifests/global/21-otel-policies.yaml
+	-./scripts/grafana_dashboards.sh delete
+	-$(KUBECTL) delete -f manifests/global/24-prometheus-monitors.yaml
 	-$(KUBECTL) delete -f manifests/global/20-observability.yaml
 	-$(KUBECTL) delete -f manifests/global/15-ratelimit.yaml
 	-$(KUBECTL) delete -f manifests/global/10-gateway.yaml
@@ -163,7 +162,6 @@ clean-global:
 clean-otel-stack:
 	-$(HELM) uninstall otel-collector-traces -n observability
 	-$(HELM) uninstall otel-collector-logs -n observability
-	-$(HELM) uninstall otel-collector-metrics -n observability
 	-$(HELM) uninstall tempo -n observability
 	-$(HELM) uninstall loki -n observability
 	-$(HELM) uninstall kube-prometheus-stack -n observability

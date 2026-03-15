@@ -107,7 +107,7 @@ spec:
       rules:
         # Fix: dynamic job match instead of hardcoded job names
         - alert: PlatformCriticalTargetDown
-          expr: min by (job) (up{job=~"envoy-gateway-proxy|demo-app-metrics|kube-.+|node-.+"}) < 1
+          expr: min by (job) (up{job=~"envoy-gateway-controller|envoy-gateway-proxy|demo-app-metrics|kube-.+|node-.+"}) < 1
           for: 5m
           labels:
             severity: critical
