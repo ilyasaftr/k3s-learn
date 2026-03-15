@@ -15,6 +15,7 @@ spec:
         type: Image
         image:
           url: ghcr.io/corazawaf/coraza-proxy-wasm@sha256:d66f944831428ea27039207fa4019bea55f9ea0a876d7b0dc8cc7c9e385fa4b1
+          sha256: 65d6009b9da2e8965e592a08b74a86725435fc01aa39c756dce0bd5ea64b3f4e
       config:
         directives_map:
           default:
