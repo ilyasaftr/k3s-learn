@@ -2,11 +2,12 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-gateway-traffic-and-metrics
-  namespace: kgateway-system
+  namespace: gateway-system
 spec:
   podSelector:
     matchLabels:
-      gateway.networking.k8s.io/gateway-name: shared-gateway
+      gateway.envoyproxy.io/owning-gateway-name: shared-gateway
+      gateway.envoyproxy.io/owning-gateway-namespace: gateway-system
   policyTypes:
     - Ingress
   ingress:
@@ -21,4 +22,4 @@ spec:
               kubernetes.io/metadata.name: observability
       ports:
         - protocol: TCP
-          port: 9091
+          port: 19001

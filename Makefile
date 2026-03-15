@@ -7,20 +7,16 @@ OTEL_ENABLE_LOGS_TRACES ?= false
 APP_DIR := manifests/apps/$(APP)
 OTEL_PROFILE_DIR := manifests/global/otel-stack/profiles/$(OTEL_PROFILE)
 
-.PHONY: apply-issuer-example install-kgateway install-optional-tailscale-operator install-otel-stack apply-global apply-app apply-all apply-optional-tailscale-grafana verify-global verify-tls verify-otel-stack verify-app verify-all verify-optional-tailscale-grafana clean-app clean-global clean-otel-stack clean-optional-tailscale-grafana clean-all check-app
+.PHONY: apply-issuer-example install-envoy-gateway install-optional-tailscale-operator install-otel-stack apply-global apply-app apply-all apply-optional-tailscale-grafana verify-global verify-tls verify-otel-stack verify-app verify-all verify-optional-tailscale-grafana clean-app clean-global clean-otel-stack clean-optional-tailscale-grafana clean-all check-app
 
 apply-issuer-example:
 	$(KUBECTL) apply -f manifests/global/00-clusterissuer-cloudflare.example.yaml
 
-install-kgateway:
-	$(HELM) upgrade -i --create-namespace --namespace kgateway-system \
-		--version v2.2.1 \
-		-f manifests/global/kgateway-values.yaml \
-		kgateway-crds oci://cr.kgateway.dev/kgateway-dev/charts/kgateway-crds
-	$(HELM) upgrade -i -n kgateway-system \
-		--version v2.2.1 \
-		-f manifests/global/kgateway-values.yaml \
-		kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway
+install-envoy-gateway:
+	$(HELM) upgrade -i envoy-gateway oci://docker.io/envoyproxy/gateway-helm \
+		--namespace gateway-system --create-namespace \
+		--version v1.7.1 \
+		-f manifests/global/envoy-gateway-values.yaml
 
 install-optional-tailscale-operator:
 	@test -n "$$TS_OAUTH_CLIENT_ID" || (echo "TS_OAUTH_CLIENT_ID is required" && exit 1)
@@ -85,8 +81,7 @@ apply-global:
 	$(KUBECTL) apply -f manifests/global/10-gateway.yaml
 	$(KUBECTL) apply -f manifests/global/15-ratelimit.yaml
 	$(KUBECTL) apply -f manifests/global/20-observability.yaml
-	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(KUBECTL) apply -f manifests/global/22-observability-logs-traces.yaml; fi
-	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(KUBECTL) apply -f manifests/global/21-otel-policies.yaml; else $(KUBECTL) delete -f manifests/global/21-otel-policies.yaml --ignore-not-found=true; $(KUBECTL) delete -f manifests/global/22-observability-logs-traces.yaml --ignore-not-found=true; fi
+	$(KUBECTL) delete -f manifests/global/21-otel-policies.yaml --ignore-not-found=true
 	$(KUBECTL) apply -f manifests/global/30-alerts-global.yaml
 	$(KUBECTL) apply -f manifests/global/40-networkpolicy-gateway.yaml
 
@@ -108,22 +103,20 @@ apply-all: apply-global
 	$(MAKE) apply-app APP=podinfo-2
 
 verify-global:
-	$(KUBECTL) get gateway -n kgateway-system
-	$(KUBECTL) wait -n kgateway-system --for=condition=Programmed gateway/shared-gateway --timeout=180s
-	$(KUBECTL) wait -n kgateway-system --for=jsonpath='{.status.conditions[?(@.type=="Accepted")].status}'=True gateway/shared-gateway --timeout=180s
-	$(KUBECTL) get deploy,svc -n kgateway-system | grep -E 'redis|ratelimit'
-	$(KUBECTL) get gatewayextension global-ratelimit -n kgateway-system
-	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(KUBECTL) get httplistenerpolicy -n kgateway-system; fi
-	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(KUBECTL) get referencegrant -n observability; fi
+	$(KUBECTL) get gatewayclass envoy
+	$(KUBECTL) get gateway -n gateway-system
+	$(KUBECTL) wait -n gateway-system --for=condition=Programmed gateway/shared-gateway --timeout=180s
+	$(KUBECTL) wait -n gateway-system --for=jsonpath='{.status.conditions[?(@.type=="Accepted")].status}'=True gateway/shared-gateway --timeout=180s
+	$(KUBECTL) get deploy,svc -n gateway-system | grep -E 'envoy-gateway|redis|shared-gateway'
 	$(KUBECTL) get prometheusrule -n observability
-	$(KUBECTL) get networkpolicy -n kgateway-system
-	$(KUBECTL) get gateway shared-gateway -n kgateway-system -o jsonpath='{.status.conditions[?(@.type=="Accepted")].message}' | grep -vi "unresolved backend reference"
+	$(KUBECTL) get networkpolicy -n gateway-system
+	$(KUBECTL) get gateway shared-gateway -n gateway-system -o jsonpath='{.status.conditions[?(@.type=="Accepted")].message}' | grep -vi "unresolved backend reference"
 
 verify-tls:
-	$(KUBECTL) wait -n kgateway-system --for=condition=Ready certificate/klawu-wildcard-cert --timeout=600s
-	$(KUBECTL) get certificate klawu-wildcard-cert -n kgateway-system
-	$(KUBECTL) get secret klawu-tls -n kgateway-system
-	$(KUBECTL) describe gateway shared-gateway -n kgateway-system
+	$(KUBECTL) wait -n gateway-system --for=condition=Ready certificate/klawu-wildcard-cert --timeout=600s
+	$(KUBECTL) get certificate klawu-wildcard-cert -n gateway-system
+	$(KUBECTL) get secret klawu-tls -n gateway-system
+	$(KUBECTL) describe gateway shared-gateway -n gateway-system
 
 verify-otel-stack:
 	$(HELM) list -n observability
@@ -135,7 +128,7 @@ verify-otel-stack:
 verify-app: check-app
 	$(KUBECTL) get deployment,svc,httproute -n demo | grep $(APP)
 	@if [ -f $(APP_DIR)/anubis.yaml ]; then $(KUBECTL) get deployment,svc -n demo | grep anubis-$(APP); fi
-	@if [ -f $(APP_DIR)/rate-limit.yaml ]; then $(KUBECTL) get trafficpolicy -n demo | grep $(APP); fi
+	@if [ -f $(APP_DIR)/rate-limit.yaml ]; then $(KUBECTL) get backendtrafficpolicy -n demo | grep $(APP); fi
 	$(KUBECTL) get prometheusrule -n observability | grep $(APP)
 	$(KUBECTL) get networkpolicy -n demo | grep $(APP)
 

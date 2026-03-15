@@ -74,7 +74,7 @@ metadata:
 spec:
   parentRefs:
     - name: shared-gateway
-      namespace: kgateway-system
+      namespace: gateway-system
       sectionName: https
   hostnames:
     - "podinfo-2.klawu.com"

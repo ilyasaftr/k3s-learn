@@ -17,39 +17,19 @@ alternateConfig:
     prometheus:
       config:
         scrape_configs:
-          - job_name: kgateway-gateways
+          - job_name: envoy-gateway-proxy
             kubernetes_sd_configs:
               - role: pod
                 namespaces:
-                  names: [kgateway-system]
-            metrics_path: /metrics
+                  names: [gateway-system]
+            metrics_path: /stats/prometheus
             relabel_configs:
-              - source_labels: [__meta_kubernetes_pod_label_gateway_networking_k8s_io_gateway_name]
+              - source_labels: [__meta_kubernetes_pod_label_gateway_envoyproxy_io_owning_gateway_name]
                 action: keep
                 regex: shared-gateway
               - source_labels: [__meta_kubernetes_pod_container_port_number]
                 action: keep
-                regex: "9091"
-              - source_labels: [__address__, __meta_kubernetes_pod_container_port_number]
-                action: replace
-                regex: "([^:]+)(?::\\d+)?;(\\d+)"
-                replacement: "$1:$2"
-                target_label: __address__
-              - source_labels: [__meta_kubernetes_namespace]
-                target_label: namespace
-              - source_labels: [__meta_kubernetes_pod_name]
-                target_label: pod
-
-          - job_name: kgateway-control-plane
-            kubernetes_sd_configs:
-              - role: pod
-                namespaces:
-                  names: [kgateway-system]
-            metrics_path: /metrics
-            relabel_configs:
-              - source_labels: [__meta_kubernetes_pod_container_port_number]
-                action: keep
-                regex: "9092"
+                regex: "19001"
               - source_labels: [__address__, __meta_kubernetes_pod_container_port_number]
                 action: replace
                 regex: "([^:]+)(?::\\d+)?;(\\d+)"

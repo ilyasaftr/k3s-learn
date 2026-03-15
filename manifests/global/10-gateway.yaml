@@ -1,33 +1,45 @@
-apiVersion: gateway.kgateway.dev/v1alpha1
-kind: GatewayParameters
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
 metadata:
-  name: shared-gateway-params
-  namespace: kgateway-system
+  name: shared-gateway-proxy-config
+  namespace: gateway-system
 spec:
-  kube:
-    deployment:
-      replicas: 1
-    envoyContainer:
-      resources:
-        requests:
-          cpu: 500m
-          memory: 512Mi
-        limits:
-          cpu: "1"
-          memory: 1Gi
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        replicas: 1
+        container:
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+  telemetry:
+    metrics:
+      prometheus: {}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: shared-gateway
-  namespace: kgateway-system
+  namespace: gateway-system
 spec:
-  gatewayClassName: kgateway
+  gatewayClassName: envoy
   infrastructure:
     parametersRef:
-      group: gateway.kgateway.dev
-      kind: GatewayParameters
-      name: shared-gateway-params
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: shared-gateway-proxy-config
   listeners:
     - name: https
       hostname: "*.klawu.com"
@@ -72,7 +84,7 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: redirect-http-to-https
-  namespace: kgateway-system
+  namespace: gateway-system
 spec:
   parentRefs:
     - name: shared-gateway
@@ -93,7 +105,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: klawu-wildcard-cert
-  namespace: kgateway-system
+  namespace: gateway-system
 spec:
   secretName: klawu-tls
   issuerRef:

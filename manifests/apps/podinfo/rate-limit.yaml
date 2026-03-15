@@ -1,5 +1,5 @@
-apiVersion: gateway.kgateway.dev/v1alpha1
-kind: TrafficPolicy
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
 metadata:
   name: podinfo-global-rate-limit
   namespace: demo
@@ -10,13 +10,11 @@ spec:
       name: podinfo
   rateLimit:
     global:
-      extensionRef:
-        name: global-ratelimit
-        namespace: kgateway-system
-      descriptors:
-        - entries:
-            - type: Generic
-              generic:
-                key: service
-                value: podinfo
-            - type: RemoteAddress
+      rules:
+        - clientSelectors:
+            - sourceCIDR:
+                value: 0.0.0.0/0
+                type: Distinct
+          limit:
+            requests: 10
+            unit: Second

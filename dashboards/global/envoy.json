@@ -21,22 +21,6 @@
   "links": [
     {
       "icon": "external link",
-      "title": "Kgateway Operations",
-      "tooltip": "Go to the upstream kgateway operations dashboard",
-      "type": "link",
-      "url": "/d/kgateway-operations",
-      "targetBlank": false
-    },
-    {
-      "icon": "external link",
-      "title": "kgateway Log Overview",
-      "tooltip": "Inspect gateway OTLP logs in Loki",
-      "type": "link",
-      "url": "/d/kgateway-log-overview",
-      "targetBlank": false
-    },
-    {
-      "icon": "external link",
       "title": "App Observability Template",
       "tooltip": "Drill into an app-specific RED dashboard",
       "type": "link",
@@ -848,7 +832,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "{app_kubernetes_io_instance=\"http\", app_kubernetes_io_name=\"http\", container=\"opentelemetry-collector\", endpoint=\"promexporter\", envoy_cluster_name=\"kube-svc_httpbin-httpbin1-8000_httpbin\", exported_instance=\"10.10.13.165:9091\", exported_job=\"gloo-gateways\", exported_pod=\"http-756d765cc4-ckxn4\", gateway_networking_k8s_io_gateway_name=\"http\", gloo=\"kube-gateway\", instance=\"10.10.2.194:9099\", job=\"monitoring/otel-monitor\", kube_namespace=\"kgateway-system\", namespace=\"telemetry\", pod=\"opentelemetry-collector-gloo-gateway-56d67d5855-vm7tr\", pod_template_hash=\"756d765cc4\", product=\"gloo-gateway\", prometheus=\"monitoring/kube-prometheus-stack-prometheus\", prometheus_replica=\"prometheus-kube-prometheus-stack-prometheus-0\", receive=\"true\", team=\"product-excellence\", tenant_id=\"default-tenant\", version=\"1.17.0-rc4\"}"
+              "options": "{app_kubernetes_io_instance=\"http\", app_kubernetes_io_name=\"http\", container=\"opentelemetry-collector\", endpoint=\"promexporter\", envoy_cluster_name=\"httproute/demo/podinfo/rule/0\", exported_instance=\"10.10.13.165:19001\", exported_job=\"envoy-gateway-proxy\", exported_pod=\"shared-gateway-xxxx\", instance=\"10.10.2.194:9099\", job=\"monitoring/otel-monitor\", kube_namespace=\"gateway-system\", namespace=\"telemetry\", pod=\"otel-collector-metrics-xxxx\", prometheus=\"monitoring/kube-prometheus-stack-prometheus\", prometheus_replica=\"prometheus-kube-prometheus-stack-prometheus-0\", receive=\"true\"}"
             },
             "properties": [
               {
@@ -1466,7 +1450,7 @@
   "refresh": "30s",
   "schemaVersion": 39,
   "tags": [
-    "kgateway",
+    "envoy-gateway",
     "otel",
     "envoy",
     "upstream"
@@ -1556,8 +1540,8 @@
   "timepicker": {},
   "timezone": "browser",
   "title": "Envoy",
-  "uid": "kgateway-envoy",
+  "uid": "envoy-gateway-envoy",
   "version": 1,
   "weekStart": "",
-  "description": "Upstream kgateway-recommended Envoy dashboard vendored from kgateway OTel-stack docs, with repo-local links for Grafana navigation."
+  "description": "Shared Envoy Gateway data-plane dashboard for gateway proxy traffic, connections, and upstream behavior."
 }

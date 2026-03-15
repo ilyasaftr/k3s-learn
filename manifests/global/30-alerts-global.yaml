@@ -1,7 +1,7 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: kgateway-global-alerts
+  name: envoy-gateway-global-alerts
   namespace: observability
   labels:
     release: kube-prometheus-stack
@@ -36,78 +36,78 @@ spec:
         - record: node:memory_usage_percent
           expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
 
-    - name: kgateway.global.rules
+    - name: envoy-gateway.global.rules
       rules:
         # Golden Signal: Traffic / Errors
-        - alert: KGatewayDeploymentUnavailable
-          expr: count(up{job="kgateway-gateways"}) > 0 and count(up{job="kgateway-gateways"} == 1) < 1
+        - alert: EnvoyGatewayProxyUnavailable
+          expr: count(up{job="envoy-gateway-proxy"}) > 0 and count(up{job="envoy-gateway-proxy"} == 1) < 1
           for: 5m
           labels:
             severity: critical
           annotations:
-            summary: "kgateway proxy has no healthy scrape targets"
-            description: "kgateway proxy scrape targets exist, but none are healthy for more than 5 minutes."
-            runbook_url: "https://github.com/ilyasaftr/k3s-learn#kgateway-proxy-has-no-data"
+            summary: "Envoy Gateway proxy has no healthy scrape targets"
+            description: "Envoy Gateway proxy scrape targets exist, but none are healthy for more than 5 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
 
-        - alert: KGatewayScrapeMissing
-          expr: absent(up{job="kgateway-gateways"})
+        - alert: EnvoyGatewayProxyScrapeMissing
+          expr: absent(up{job="envoy-gateway-proxy"})
           for: 10m
           labels:
             severity: critical
           annotations:
-            summary: "kgateway scrape target missing"
-            description: "Prometheus does not see the kgateway-gateways target for 10 minutes."
-            runbook_url: "https://github.com/ilyasaftr/k3s-learn#kgateway-proxy-has-no-data"
+            summary: "Envoy Gateway proxy scrape target missing"
+            description: "Prometheus does not see the envoy-gateway-proxy target for 10 minutes."
+            runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
 
-        - alert: KGatewayHigh5xx
-          expr: sum(rate(envoy_http_downstream_rq_xx{job="kgateway-gateways",envoy_response_code_class="5"}[5m])) > 1
+        - alert: EnvoyGatewayHigh5xx
+          expr: sum(rate(envoy_http_downstream_rq_xx{job="envoy-gateway-proxy",envoy_response_code_class="5"}[5m])) > 1
           for: 5m
           labels:
             severity: warning
           annotations:
-            summary: "High 5xx rate on kgateway ({{ $value | humanize }} rq/s)"
-            description: "kgateway downstream 5xx rate is above 1 req/s for 5 minutes."
+            summary: "High 5xx rate on Envoy Gateway ({{ $value | humanize }} rq/s)"
+            description: "Envoy Gateway downstream 5xx rate is above 1 req/s for 5 minutes."
             runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
 
         # Golden Signal: Latency
-        - alert: KGatewayHighLatency
+        - alert: EnvoyGatewayHighLatency
           expr: |
             1000 * histogram_quantile(0.95,
               sum(rate(envoy_http_downstream_rq_time_bucket{
-                job="kgateway-gateways"
+                job="envoy-gateway-proxy"
               }[5m])) by (le)
             ) > 500
           for: 10m
           labels:
             severity: warning
           annotations:
-            summary: "kgateway p95 latency above 500ms ({{ $value | humanize }}ms)"
-            description: "kgateway downstream p95 latency has been above 500ms for 10 minutes."
+            summary: "Envoy Gateway p95 latency above 500ms ({{ $value | humanize }}ms)"
+            description: "Envoy Gateway downstream p95 latency has been above 500ms for 10 minutes."
             runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
 
         # Golden Signal: Saturation
-        - alert: KGatewayProxyCpuThrottled
+        - alert: EnvoyGatewayProxyCpuThrottled
           expr: |
             100 * sum(rate(container_cpu_cfs_throttled_periods_total{
-              namespace="kgateway-system",
-              pod=~"shared-gateway-.*"
+              namespace="gateway-system",
+              container="envoy"
             }[5m])) / clamp_min(sum(rate(container_cpu_cfs_periods_total{
-              namespace="kgateway-system",
-              pod=~"shared-gateway-.*"
+              namespace="gateway-system",
+              container="envoy"
             }[5m])), 1) > 25
           for: 10m
           labels:
             severity: warning
           annotations:
-            summary: "kgateway proxy CPU throttled ({{ $value | humanize }}%)"
-            description: "kgateway proxy pods are CPU throttled above 25% for 10 minutes. Consider increasing CPU limits."
+            summary: "Envoy Gateway proxy CPU throttled ({{ $value | humanize }}%)"
+            description: "Envoy Gateway proxy pods are CPU throttled above 25% for 10 minutes. Consider increasing CPU limits."
             runbook_url: "https://github.com/ilyasaftr/k3s-learn#troubleshooting"
 
     - name: platform.resource.rules
       rules:
         # Fix: dynamic job match instead of hardcoded job names
         - alert: PlatformCriticalTargetDown
-          expr: min by (job) (up{job=~"kgateway-gateways|demo-app-metrics|kube-.+|node-.+"}) < 1
+          expr: min by (job) (up{job=~"envoy-gateway-proxy|demo-app-metrics|kube-.+|node-.+"}) < 1
           for: 5m
           labels:
             severity: critical

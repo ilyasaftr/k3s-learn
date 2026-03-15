@@ -1,0 +1,23 @@
+deployment:
+  envoyGateway:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
+
+config:
+  envoyGateway:
+    gateway:
+      controllerName: gateway.envoyproxy.io/gatewayclass-controller
+    provider:
+      type: Kubernetes
+      kubernetes:
+        deploy:
+          type: GatewayNamespace
+    rateLimit:
+      backend:
+        type: Redis
+        redis:
+          url: redis.gateway-system.svc.cluster.local:6379

@@ -1,6 +1,6 @@
-# k3s-learn (kgateway + OTel Stack)
+# k3s-learn (Envoy Gateway + OTel Stack)
 
-This repo now uses an OTel-first observability stack for kgateway.
+This repo now uses Envoy Gateway as the shared public edge, with an OTel-first metrics stack for operations.
 
 Primary signals:
 
@@ -10,17 +10,16 @@ Primary signals:
 - Collection/Pipeline: OpenTelemetry Collector (metrics, logs, traces)
 - Visualization: Grafana
 
-App routing stays on the shared kgateway Gateway API resources, but `podinfo-2` is now fronted by Anubis before requests reach the app service.
+App routing stays on the shared Envoy Gateway resources, and `podinfo-2` is fronted by Anubis before requests reach the app service.
 
 ## Architecture
 
 ```text
 Clients
-  -> shared-gateway (kgateway / Envoy)
+  -> shared-gateway (Envoy Gateway / Envoy)
       -> podinfo (demo namespace)
       -> anubis-podinfo-2 -> podinfo-2 (demo namespace)
-      -> global ratelimit service (for podinfo only)
-          -> Redis counters (kgateway-system)
+      -> Redis-backed route-scoped rate limit for podinfo (gateway-system)
 
 Observability namespace
   - kube-prometheus-stack (Prometheus + Grafana)
@@ -32,8 +31,7 @@ Observability namespace
 
 Telemetry flow
   - Gateway metrics + app /metrics -> otel-collector-metrics -> Prometheus remote write
-  - Gateway access logs (OTLP) -> otel-collector-logs -> Loki
-  - Gateway traces (OTLP) -> otel-collector-traces -> Tempo
+  - Gateway access logs and traces are intentionally not wired in v1 of the Envoy Gateway migration
 ```
 
 ## Repository Layout
@@ -44,7 +42,6 @@ manifests/
     10-gateway.yaml
     15-ratelimit.yaml
     20-observability.yaml
-    21-otel-policies.yaml
     30-alerts-global.yaml
     40-networkpolicy-gateway.yaml
     otel-stack/
@@ -68,7 +65,7 @@ Makefile
 - Kubernetes cluster (`k3s` is fine)
 - Helm 3
 - Gateway API CRDs
-- kgateway installed with `GatewayClass` named `kgateway`
+- Envoy Gateway installed with `GatewayClass` named `envoy`
 - cert-manager installed
 
 Current pinned chart versions in this repo (verified on 2026-03-13):
@@ -114,20 +111,20 @@ kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/downloa
 kubectl get crd | grep gateway.networking.k8s.io
 ```
 
-### 3) kgateway
+### 3) Envoy Gateway
 
 ```bash
-make install-kgateway
+make install-envoy-gateway
 
-kubectl -n kgateway-system rollout status deploy/kgateway --timeout=180s
-kubectl get gatewayclass kgateway
+kubectl -n gateway-system rollout status deploy/envoy-gateway --timeout=180s
+kubectl get gatewayclass envoy
 ```
 
-The kgateway install uses [kgateway-values.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/kgateway-values.yaml) to:
+The Envoy Gateway install uses [envoy-gateway-values.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/envoy-gateway-values.yaml) to:
 
-- give the kgateway control plane explicit memory requests and limits
-- point the default `kgateway` `GatewayClass` at the repo-managed `shared-gateway-params` `GatewayParameters`
-- ensure the generated `shared-gateway` proxy is not left in `BestEffort` QoS
+- give the Envoy Gateway control plane explicit memory requests and limits
+- enable `GatewayNamespace` deployment mode so the `shared-gateway` proxy stays in `gateway-system`
+- enable Redis-backed global rate limiting for Envoy Gateway
 
 ### 4) cert-manager
 
@@ -183,7 +180,7 @@ make apply-app APP=podinfo
 make apply-app APP=podinfo-2
 ```
 
-`make apply-global` now installs the shared Redis + `envoyproxy/ratelimit` backend in `kgateway-system` and the `GatewayExtension` that `podinfo` uses for global rate limiting.
+`make apply-global` now installs the shared Envoy Gateway resources in `gateway-system` and the Redis backend that `podinfo` uses for route-scoped global rate limiting.
 
 `make apply-app APP=podinfo-2` now also deploys Anubis in `demo` and repoints the public `HTTPRoute` so `podinfo-2.klawu.com` is challenged before traffic reaches the original `podinfo-2` service. The original `podinfo-2` ClusterIP service remains available for in-cluster access and metrics scraping.
 
@@ -193,7 +190,7 @@ The initial Anubis rollout is conservative:
 - there are no public bypasses for `/healthz` or `/metrics`
 - the original `podinfo-2` service still handles in-cluster app traffic and Prometheus scraping
 
-By default, `make apply-global` does not apply the gateway OTLP log/trace policy or the Loki/Tempo Grafana datasources. Re-enable them with `OTEL_ENABLE_LOGS_TRACES=true`.
+The first Envoy Gateway migration keeps metrics and alerts only. Gateway OTLP access logs and tracing are intentionally not configured in v1.
 
 If you use the wildcard cert flow:
 
@@ -213,10 +210,9 @@ kubectl get pvc -n observability
 
 `make verify-global` also checks that:
 
-- `redis` and `ratelimit` are up in `kgateway-system`
-- `GatewayExtension/global-ratelimit` exists
-
-If you enable logs/traces, `make verify-global OTEL_ENABLE_LOGS_TRACES=true` also checks the gateway OTLP policy objects.
+- Envoy Gateway is running in `gateway-system`
+- `redis` is up in `gateway-system`
+- `shared-gateway` is accepted and programmed
 
 ### Verify TLS and apps
 
@@ -226,7 +222,7 @@ make verify-app APP=podinfo
 make verify-app APP=podinfo-2
 ```
 
-`make verify-app APP=podinfo` now checks the route-scoped `TrafficPolicy` too.
+`make verify-app APP=podinfo` now checks the route-scoped `BackendTrafficPolicy` too.
 
 `make verify-app APP=podinfo-2` also checks the `anubis-podinfo-2` deployment and service.
 
@@ -279,30 +275,20 @@ kubectl get secret -n observability kube-prometheus-stack-grafana \
 
 In Grafana, verify:
 
-- Prometheus datasource has `kgateway-gateways`, `kgateway-control-plane`, and `demo-app-metrics` series
-- Open the vendored upstream dashboards: `Envoy` and `Kgateway Operations`
-- These dashboards are checked into this repo from the kgateway docs so Grafana does not depend on the unstable docs-hosted `.../main/.../*.json` URLs at runtime
-
-If logs/traces are enabled:
-
-- Loki has gateway access logs
-- Tempo shows gateway traces
-- Use `kgateway Log Overview` for OTLP gateway logs with the selector `{service_name="shared-gateway.kgateway-system"}`
+- Prometheus datasource has `envoy-gateway-proxy` and `demo-app-metrics` series
+- the shared and per-app alerts evaluate against those metrics
 
 ## Important Behavior
 
 - App-side OTel instrumentation is not required for v1.
-- `podinfo` works with gateway-generated logs/traces immediately.
-- `podinfo` now also uses global rate limiting through `envoyproxy/ratelimit` with Redis-backed shared counters.
-- The `podinfo` global limit is `10 requests/second` per client IP, using `RemoteAddress` plus a static `service=podinfo` descriptor.
+- `podinfo` now uses Envoy Gateway global rate limiting with Redis-backed shared counters.
+- The `podinfo` global limit is `10 requests/second` per client IP.
 - The limit is shared across all `shared-gateway` replicas, so scaling the gateway does not double the effective `podinfo` quota.
 - `podinfo-2` and other routes on `shared-gateway` are not rate-limited by this config.
-- `failOpen: true` is set on `GatewayExtension/global-ratelimit`, so if Redis or the ratelimit service is down, `podinfo` traffic continues and only the protection is bypassed temporarily.
 - App `/metrics` scraping is still retained (via OTel metrics collector), so app-level operational visibility remains.
 - Loki, Tempo, and the OTLP log/trace collectors are disabled by default in the repo flow, but can be re-enabled later with `OTEL_ENABLE_LOGS_TRACES=true`.
-- `shared-gateway` now gets explicit Envoy resource requests and limits via `GatewayParameters`.
-- The kgateway control plane now gets explicit resource requests and limits via the Helm values file.
-- When enabled, Tempo remains gateway-level tracing only in this profile.
+- `shared-gateway` now gets explicit Envoy resource requests and limits via `EnvoyProxy`.
+- The Envoy Gateway control plane now gets explicit resource requests and limits via the Helm values file.
 - The low-memory defaults are tuned for single-node durability, not HA.
 - Multi-node readiness is handled by the profile layout; do not scale this profile into HA by only increasing replica counts.
 
@@ -340,40 +326,17 @@ make clean-otel-stack
 - Gateway policy not attached:
 
 ```bash
-kubectl get httplistenerpolicy -n kgateway-system
-kubectl describe httplistenerpolicy shared-gateway-otel -n kgateway-system
-kubectl get referencegrant -n observability
-kubectl get svc -n observability | grep otel-collector
-```
-
-Expected collector Services for policy backend refs:
-
-- `otel-collector-logs`
-- `otel-collector-traces`
-
-- No gateway traces:
-
-```bash
-kubectl logs -n observability deploy/otel-collector-traces --tail=200
-kubectl get svc -n observability | grep tempo
-```
-
-- No gateway logs:
-
-```bash
-kubectl logs -n observability deploy/otel-collector-logs --tail=200
-kubectl get svc -n observability | grep loki
-helm upgrade -i otel-collector-logs open-telemetry/opentelemetry-collector -n observability \
-  --version 0.147.0 --reset-values \
-  -f manifests/global/otel-stack/otel-collector-logs-values.yaml \
-  -f manifests/global/otel-stack/profiles/single-node-prod-small/otel-collector-logs-values.yaml
+kubectl get gatewayclass envoy
+kubectl get gateway shared-gateway -n gateway-system
+kubectl describe gateway shared-gateway -n gateway-system
+kubectl get pods -n gateway-system
 ```
 
 - No metrics for gateway/apps:
 
 ```bash
 kubectl logs -n observability deploy/otel-collector-metrics --tail=200
-kubectl get pods -n kgateway-system -l gateway.networking.k8s.io/gateway-name=shared-gateway
+kubectl get pods -n gateway-system -l gateway.envoyproxy.io/owning-gateway-name=shared-gateway
 kubectl get pods -n demo -l app=podinfo
 kubectl get pods -n demo -l app=podinfo-2
 ```
@@ -384,6 +347,6 @@ kubectl get pods -n demo -l app=podinfo-2
 
 ```bash
 kubectl get order,challenge -A
-kubectl describe certificate -n kgateway-system klawu-wildcard-cert
+kubectl describe certificate -n gateway-system klawu-wildcard-cert
 kubectl logs -n cert-manager deploy/cert-manager --tail=200
 ```
