@@ -13,9 +13,9 @@ spec:
   ingress:
     - ports:
         - protocol: TCP
-          port: 80
+          port: 10080
         - protocol: TCP
-          port: 443
+          port: 10443
     - from:
         - namespaceSelector:
             matchLabels:
