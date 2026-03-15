@@ -75,6 +75,7 @@ install-otel-stack:
 apply-global:
 	$(KUBECTL) apply -f manifests/global/10-gateway.yaml
 	$(KUBECTL) apply -f manifests/global/15-ratelimit.yaml
+	$(KUBECTL) apply -f manifests/global/16-waf-coraza.yaml
 	$(KUBECTL) apply -f manifests/global/20-observability.yaml
 	$(KUBECTL) apply -f manifests/global/24-prometheus-monitors.yaml
 	./scripts/grafana_dashboards.sh apply
@@ -103,6 +104,8 @@ verify-global:
 	$(KUBECTL) get gateway -n gateway-system
 	$(KUBECTL) wait -n gateway-system --for=condition=Programmed gateway/shared-gateway --timeout=180s
 	$(KUBECTL) wait -n gateway-system --for=jsonpath='{.status.conditions[?(@.type=="Accepted")].status}'=True gateway/shared-gateway --timeout=180s
+	$(KUBECTL) get envoyextensionpolicy coraza-waf -n gateway-system
+	$(KUBECTL) wait -n gateway-system --for=jsonpath='{.status.conditions[?(@.type=="Accepted")].status}'=True envoyextensionpolicy/coraza-waf --timeout=180s
 	$(KUBECTL) get deploy,svc -n gateway-system | grep -E 'envoy-gateway|redis|shared-gateway'
 	$(KUBECTL) get prometheusrule -n observability
 	$(KUBECTL) get networkpolicy -n gateway-system
@@ -156,6 +159,7 @@ clean-global:
 	-./scripts/grafana_dashboards.sh delete
 	-$(KUBECTL) delete -f manifests/global/24-prometheus-monitors.yaml
 	-$(KUBECTL) delete -f manifests/global/20-observability.yaml
+	-$(KUBECTL) delete -f manifests/global/16-waf-coraza.yaml
 	-$(KUBECTL) delete -f manifests/global/15-ratelimit.yaml
 	-$(KUBECTL) delete -f manifests/global/10-gateway.yaml
 

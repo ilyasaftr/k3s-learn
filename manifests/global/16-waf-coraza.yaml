@@ -1,0 +1,25 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: coraza-waf
+  namespace: gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: shared-gateway
+  wasm:
+    - name: coraza-waf
+      failOpen: true
+      code:
+        type: Image
+        image:
+          url: ghcr.io/corazawaf/coraza-proxy-wasm@sha256:d66f944831428ea27039207fa4019bea55f9ea0a876d7b0dc8cc7c9e385fa4b1
+      config:
+        directives_map:
+          default:
+            - "Include @recommended-conf"
+            - "SecRuleEngine DetectionOnly"
+            - "Include @crs-setup-conf"
+            - "Include @owasp_crs/*.conf"
+        default_directives: default

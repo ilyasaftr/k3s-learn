@@ -191,6 +191,40 @@ The initial Anubis rollout is conservative:
 
 The current Envoy Gateway setup uses direct Prometheus scraping for metrics. Gateway OTLP access logs and tracing are still intentionally not configured in v1.
 
+## Coraza WAF (Proxy-WASM)
+
+This repo now applies a global Coraza WAF policy on `shared-gateway` using Envoy Gateway `EnvoyExtensionPolicy` with WASM:
+
+- Scope: global on `shared-gateway` (covers `podinfo` and `podinfo-2`)
+- Mode: `SecRuleEngine DetectionOnly` (non-blocking first rollout)
+- Rules: `@recommended-conf` + baseline CRS (`@crs-setup-conf`, `@owasp_crs/*.conf`)
+- Module source: pinned OCI digest (`ghcr.io/corazawaf/coraza-proxy-wasm@sha256:...`)
+
+The policy is defined in [16-waf-coraza.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/16-waf-coraza.yaml).
+
+Verify it is attached:
+
+```bash
+kubectl get envoyextensionpolicy coraza-waf -n gateway-system
+kubectl get envoyextensionpolicy coraza-waf -n gateway-system -o yaml
+```
+
+Detection test examples (requests should still pass in DetectionOnly mode):
+
+```bash
+curl -sk --resolve podinfo.klawu.com:443:<LB_IP> \
+  "https://podinfo.klawu.com/?q=<script>alert(1)</script>"
+
+curl -sk --resolve podinfo-2.klawu.com:443:<LB_IP> \
+  "https://podinfo-2.klawu.com/?id=1%27%20OR%20%271%27=%271"
+```
+
+Rollback:
+
+```bash
+kubectl delete -f manifests/global/16-waf-coraza.yaml
+```
+
 If you use the wildcard cert flow:
 
 ```bash
