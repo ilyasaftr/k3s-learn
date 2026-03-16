@@ -1,5 +1,5 @@
 apiVersion: gateway.envoyproxy.io/v1alpha1
-kind: SecurityPolicy
+kind: EnvoyExtensionPolicy
 metadata:
   name: podinfo-waf-blocking
   namespace: demo
@@ -8,19 +8,17 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       name: podinfo
-  extAuth:
-    grpc:
-      backendRefs:
+  extProc:
+    - backendRefs:
         - group: ""
           kind: Service
-          name: coraza-ext-auth
+          name: coraza-ext-proc-block
           namespace: gateway-system
           port: 9002
-    timeout: 50ms
-    failOpen: false
-    bodyToExtAuth:
-      maxRequestBytes: 1048576
-    contextExtensions:
-      - name: mode
-        type: Value
-        value: block
+      messageTimeout: 200ms
+      failOpen: false
+      processingMode:
+        request:
+          body: Buffered
+        response:
+          body: Buffered

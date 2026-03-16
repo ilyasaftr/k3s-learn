@@ -17,8 +17,7 @@ App routing stays on the shared Envoy Gateway resources, and `podinfo-2` is fron
 ```text
 Clients
   -> shared-gateway (Envoy Gateway / Envoy)
-      -> coraza-ext-auth (ext_authz, gateway-system)
-      -> podinfo (demo namespace)
+      -> podinfo (demo namespace, route-level coraza ext_proc)
       -> anubis-podinfo-2 -> podinfo-2 (demo namespace)
       -> Redis-backed route-scoped rate limit for podinfo (gateway-system)
 
@@ -33,7 +32,7 @@ Telemetry flow
   - Envoy Gateway controller metrics -> Prometheus
   - Envoy proxy metrics -> Prometheus
   - App /metrics -> Prometheus
-  - Gateway access logs and traces are intentionally not wired in v1 of the Envoy Gateway migration
+  - Gateway access logs and traces are intentionally not wired by default
 ```
 
 ## Repository Layout
@@ -62,8 +61,8 @@ manifests/
 Makefile
 ```
 
-Coraza ext-auth service source is maintained in a separate repo:
-[ilyasaftr/coraza-envoy-ext-authz](https://github.com/ilyasaftr/coraza-envoy-ext-authz).
+Coraza ext-proc service source is maintained in a separate repo:
+[ilyasaftr/coraza-envoy-waf](https://github.com/ilyasaftr/coraza-envoy-waf).
 
 ## Prerequisites
 
@@ -80,7 +79,7 @@ Current pinned chart versions in this repo (verified on 2026-03-13):
 - `grafana-community/tempo` `2.0.0` with `tempo.tag=2.10.2`
 - `open-telemetry/opentelemetry-collector` `0.147.0`
 
-Note: Tempo project is active. The old `grafana/tempo` chart path is deprecated; this repo uses the maintained `grafana-community/tempo` chart source.
+Note: This repo uses the `grafana-community/tempo` chart source.
 
 Observability profiles:
 
@@ -179,13 +178,13 @@ The `single-node-prod-small` profile currently does all of the following when lo
 ## Apply This Repo
 
 ```bash
-export CORAZA_EXT_AUTH_IMAGE="ghcr.io/<your-org>/coraza-ext-auth@sha256:<digest>"
+export CORAZA_EXT_PROC_IMAGE="ghcr.io/<your-org>/coraza-envoy-waf@sha256:<digest>"
 make apply-global
 make apply-app APP=podinfo
 make apply-app APP=podinfo-2
 ```
 
-`make apply-global` now installs the shared Envoy Gateway resources in `gateway-system`, Redis for `podinfo` route-scoped global rate limiting, Coraza ext-authz resources, direct Prometheus scrape monitors, and the vendored official Envoy Gateway Grafana dashboards.
+`make apply-global` now installs the shared Envoy Gateway resources in `gateway-system`, Redis for `podinfo` route-scoped global rate limiting, Coraza ext-proc backend resources, direct Prometheus scrape monitors, and the vendored official Envoy Gateway Grafana dashboards.
 
 `make apply-app APP=podinfo-2` now also deploys Anubis in `demo` and repoints the public `HTTPRoute` so `podinfo-2.klawu.com` is challenged before traffic reaches the original `podinfo-2` service. The original `podinfo-2` ClusterIP service remains available for in-cluster access and metrics scraping.
 
@@ -197,51 +196,44 @@ The initial Anubis rollout is conservative:
 
 The current Envoy Gateway setup uses direct Prometheus scraping for metrics. Gateway OTLP access logs and tracing are still intentionally not configured in v1.
 
-## Coraza WAF (ext_authz Service)
+## Coraza WAF (ext_proc Service)
 
-This repo now uses Coraza as a dedicated external authorization service (`ext_authz`) with Envoy Gateway `SecurityPolicy`:
+This repo now uses Coraza as an external processing service (`ext_proc`) with Envoy Gateway `EnvoyExtensionPolicy`:
 
-- Scope: global detect mode on `shared-gateway` (covers `podinfo` and `podinfo-2`)
-- Override: route-level block mode for `podinfo` only
-- Body profile: strict `maxRequestBytes=1048576`, fail-closed (`failOpen=false`)
-- Runtime: standalone gRPC service (`coraza-ext-auth`) in `gateway-system`
+- Scope: no global WAF policy on `shared-gateway`
+- Enforcement: route-level block mode for `podinfo` only
+- Body profile: buffered request/response inspection with `1048576` byte limits
+- Runtime: standalone gRPC service (`coraza-ext-proc-block`) in `gateway-system`
 
-`podinfo` keeps a route-specific override in [waf.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/apps/podinfo/waf.yaml), while `podinfo-2` inherits global detect mode.
+`podinfo` keeps a route-specific WAF policy in [waf.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/apps/podinfo/waf.yaml), while `podinfo-2` has no Coraza policy.
 
-The global deployment and policy are defined in [16-waf-coraza.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/16-waf-coraza.yaml).
+The shared service deployment and reference grant are defined in [16-waf-coraza.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/16-waf-coraza.yaml).
 
-Build and publish your pinned ext-auth image (owned registry) before apply:
+Build and publish your pinned ext-proc image (owned registry) before apply:
 
 ```bash
-git clone git@github.com:ilyasaftr/coraza-envoy-ext-authz.git
-cd coraza-envoy-ext-authz
+git clone git@github.com:ilyasaftr/coraza-envoy-waf.git
+cd coraza-envoy-waf
 docker buildx build --platform linux/amd64 \
-  -t ghcr.io/<your-org>/coraza-envoy-ext-authz:v0.1.0 \
+  -t ghcr.io/<your-org>/coraza-envoy-waf:v0.1.0 \
   --push .
 
-docker buildx imagetools inspect ghcr.io/<your-org>/coraza-envoy-ext-authz:v0.1.0
+docker buildx imagetools inspect ghcr.io/<your-org>/coraza-envoy-waf:v0.1.0
 ```
 
 Then set the digest-pinned image for apply:
 
 ```bash
-export CORAZA_EXT_AUTH_IMAGE="ghcr.io/<your-org>/coraza-envoy-ext-authz@sha256:<digest>"
+export CORAZA_EXT_PROC_IMAGE="ghcr.io/<your-org>/coraza-envoy-waf@sha256:<digest>"
 make apply-global
 ```
 
 Verify policy and reference wiring:
 
 ```bash
-kubectl get securitypolicy -A
+kubectl get envoyextensionpolicy -n demo
 kubectl get referencegrant -n gateway-system
-kubectl get deploy,svc -n gateway-system | grep coraza-ext-auth
-```
-
-Detection test example (`podinfo-2` should still pass while being inspected):
-
-```bash
-curl -sk --resolve podinfo-2.klawu.com:443:<LB_IP> \
-  "https://podinfo-2.klawu.com/?id=1%27%20OR%20%271%27=%271"
+kubectl get deploy,svc -n gateway-system | grep coraza-ext-proc-block
 ```
 
 Blocking test example (`podinfo` should return `403` for malicious payloads):
@@ -252,10 +244,10 @@ curl -sk -o /dev/null -w "%{http_code}\n" \
   "https://podinfo.klawu.com/?q=<script>alert(1)</script>"
 ```
 
-Detection logs now come from the ext-auth service:
+Detection and blocking logs now come from the ext-proc service:
 
 ```bash
-kubectl logs -n gateway-system deploy/coraza-ext-auth --since=10m | grep -i interruption
+kubectl logs -n gateway-system deploy/coraza-ext-proc-block --since=10m | grep -i interruption
 ```
 
 Rollback:
@@ -285,13 +277,13 @@ kubectl get pvc -n observability
 
 - Envoy Gateway is running in `gateway-system`
 - `redis` is up in `gateway-system`
-- `coraza-ext-auth` is ready in `gateway-system`
-- global `SecurityPolicy` + `ReferenceGrant` for ext-authz are present
+- `coraza-ext-proc-block` is ready in `gateway-system`
+- `ReferenceGrant` for app-level `EnvoyExtensionPolicy` is present
 - `shared-gateway` is accepted and programmed
 
 `make verify-otel-stack` now also checks that:
 
-- direct `PodMonitor` resources exist for the Envoy Gateway controller, Envoy proxy, demo app metrics, and `coraza-ext-auth`
+- direct `PodMonitor` resources exist for the Envoy Gateway controller, Envoy proxy, demo app metrics, and `coraza-ext-proc-block`
 - vendored Grafana dashboard ConfigMaps are present in `observability`
 
 ### Verify TLS and apps
@@ -302,7 +294,7 @@ make verify-app APP=podinfo
 make verify-app APP=podinfo-2
 ```
 
-`make verify-app APP=podinfo` now checks the route-scoped `BackendTrafficPolicy` and `SecurityPolicy` override.
+`make verify-app APP=podinfo` now checks the route-scoped `BackendTrafficPolicy` and `EnvoyExtensionPolicy` WAF override.
 
 `make verify-app APP=podinfo-2` also checks the `anubis-podinfo-2` deployment and service.
 
@@ -370,9 +362,9 @@ In Grafana, verify:
 - The `podinfo` global limit is `10 requests/second` per client IP.
 - The limit is shared across all `shared-gateway` replicas, so scaling the gateway does not double the effective `podinfo` quota.
 - `podinfo-2` and other routes on `shared-gateway` are not rate-limited by this config.
-- Coraza WAF is now enforced through `SecurityPolicy.extAuth` with a dedicated `coraza-ext-auth` gRPC service.
-- WAF evaluation is request-time authorization (no response-phase body inspection in this model).
-- Ext-authz WAF is configured fail-closed; if `coraza-ext-auth` is unavailable, requests are denied by design.
+- Coraza WAF is now enforced through route-level `EnvoyExtensionPolicy.extProc` with a dedicated `coraza-ext-proc-block` gRPC service.
+- WAF inspection for `podinfo` includes request and response phases with buffered body processing.
+- Ext-proc WAF is configured fail-closed; if `coraza-ext-proc-block` is unavailable, `podinfo` requests are denied by design.
 - App `/metrics` scraping is retained through direct Prometheus scraping, so app-level operational visibility remains.
 - Loki, Tempo, and the OTLP log/trace collectors are disabled by default in the repo flow, but can be re-enabled later with `OTEL_ENABLE_LOGS_TRACES=true`.
 - `shared-gateway` now gets explicit Envoy resource requests and limits via `EnvoyProxy`.
@@ -417,10 +409,10 @@ make clean-otel-stack
 kubectl get gatewayclass envoy
 kubectl get gateway shared-gateway -n gateway-system
 kubectl describe gateway shared-gateway -n gateway-system
-kubectl get securitypolicy -A
+kubectl get envoyextensionpolicy -A
 kubectl get referencegrant -n gateway-system
-kubectl get deploy coraza-ext-auth -n gateway-system
-kubectl logs -n gateway-system deploy/coraza-ext-auth --tail=100
+kubectl get deploy coraza-ext-proc-block -n gateway-system
+kubectl logs -n gateway-system deploy/coraza-ext-proc-block --tail=100
 kubectl get pods -n gateway-system
 ```
 

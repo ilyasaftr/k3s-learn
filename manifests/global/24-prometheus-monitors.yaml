@@ -75,7 +75,7 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
-  name: coraza-ext-auth
+  name: coraza-ext-proc-block
   namespace: observability
   labels:
     release: kube-prometheus-stack
@@ -85,12 +85,12 @@ spec:
       - gateway-system
   selector:
     matchLabels:
-      app: coraza-ext-auth
+      app: coraza-ext-proc-block
   podMetricsEndpoints:
     - port: metrics
       path: /metrics
       interval: 30s
       relabelings:
         - action: replace
-          replacement: coraza-ext-auth
+          replacement: coraza-ext-proc-block
           targetLabel: job
