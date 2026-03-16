@@ -63,6 +63,39 @@ CM_NAME="coraza-ext-proc-profiles"
 NS="gateway-system"
 DEPLOY="coraza-ext-proc-block"
 
+load_profiles_yaml_from_configmap() {
+  kubectl get configmap "$CM_NAME" -n "$NS" -o jsonpath='{.data.profiles\.yaml}'
+}
+
+extract_strict_block() {
+  awk '
+    /^  strict:/ {in_strict=1}
+    in_strict {
+      if ($0 ~ /^  [^[:space:]]/ && $0 !~ /^  strict:/) exit
+      print
+    }
+  '
+}
+
+assert_outbound_observe_contract() {
+  local profiles_yaml strict_block strict_mode_value
+  profiles_yaml="$(load_profiles_yaml_from_configmap)"
+  strict_block="$(printf '%s\n' "$profiles_yaml" | extract_strict_block)"
+  strict_mode_value="$(printf '%s\n' "$strict_block" | awk '/^[[:space:]]*mode:[[:space:]]*/ {print $2; exit}')"
+
+  if [[ "$strict_mode_value" != "detect" ]]; then
+    echo "RESULT=FAIL"
+    echo "reason=outbound-threshold-observe requires strict.mode=detect, found strict.mode=${strict_mode_value:-<empty>}"
+    exit 1
+  fi
+
+  if ! printf '%s\n' "$strict_block" | grep -Eq '^[[:space:]]*-[[:space:]]*application/json[[:space:]]*$'; then
+    echo "RESULT=FAIL"
+    echo "reason=outbound-threshold-observe requires strict.response_body_mime_types to include application/json"
+    exit 1
+  fi
+}
+
 strict_mode="block"
 strict_excluded="[]"
 strict_inbound="5"
@@ -229,6 +262,10 @@ kubectl create configmap "$CM_NAME" -n "$NS" \
   --from-file=profiles.yaml="$tmp_profiles" \
   --dry-run=client -o yaml | kubectl apply -f -
 
+if [[ "$checkpoint" == "outbound-threshold-observe" ]]; then
+  assert_outbound_observe_contract
+fi
+
 kubectl rollout restart deploy/"$DEPLOY" -n "$NS" >/dev/null
 kubectl rollout status deploy/"$DEPLOY" -n "$NS" --timeout=180s >/dev/null
 
@@ -251,10 +288,36 @@ url="https://${host}:18443${path}"
 status_code="$(curl "${curl_args[@]}" -o /tmp/waf-checkpoint.out -w '%{http_code}' "$url")"
 
 if [[ "$run_mode" == "observe" ]]; then
+  observe_logs="$(kubectl logs -n "$NS" deploy/"$DEPLOY" --since=2m | grep 'coraza ext_proc request summary' | grep 'path=/echo' || true)"
   echo "CHECKPOINT=$checkpoint STATUS=$status_code EXPECTED=$expected_code"
-  kubectl logs -n "$NS" deploy/"$DEPLOY" --since=2m | grep 'path=/echo' | tail -n 3 || true
+  printf '%s\n' "$observe_logs" | tail -n 3 || true
   if [[ "$status_code" != "$expected_code" ]]; then
     echo "RESULT=FAIL"
+    exit 1
+  fi
+  if [[ -z "$observe_logs" ]]; then
+    echo "RESULT=FAIL"
+    echo "reason=missing ext-proc summary logs for path=/echo"
+    exit 1
+  fi
+  if ! printf '%s\n' "$observe_logs" | grep -Eq 'action_results='; then
+    echo "RESULT=FAIL"
+    echo "reason=missing action_results field in ext-proc summary logs"
+    exit 1
+  fi
+  if ! printf '%s\n' "$observe_logs" | grep -Eq 'action[:=]response_body'; then
+    echo "RESULT=FAIL"
+    echo "reason=missing response_body action evidence in ext-proc summary logs"
+    exit 1
+  fi
+  if ! printf '%s\n' "$observe_logs" | grep -Eq 'threshold[:=]1([^0-9]|$)'; then
+    echo "RESULT=FAIL"
+    echo "reason=missing threshold=1 evidence for response_body action"
+    exit 1
+  fi
+  if ! printf '%s\n' "$observe_logs" | grep -Eq 'threshold_source[:=]env_override'; then
+    echo "RESULT=FAIL"
+    echo "reason=missing threshold_source=env_override evidence for response_body action"
     exit 1
   fi
   echo "RESULT=PASS (observe)"

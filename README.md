@@ -279,9 +279,18 @@ Checkpoint validation helper (run one checkpoint at a time):
 ```bash
 ./scripts/waf_checkpoint.sh list
 ./scripts/waf_checkpoint.sh mode-block
+./scripts/waf_checkpoint.sh outbound-threshold-observe
+./scripts/waf_checkpoint.sh response-body-limit-low
 ./scripts/waf_checkpoint.sh query-no-body
 ./scripts/waf_checkpoint.sh exclude-949110
 ```
+
+Checkpoint semantics:
+
+- `outbound-threshold-observe` is intentionally observe-only: it enforces `strict.mode=detect` and validates response-phase evidence (`action=response_body`, `threshold=1`, `threshold_source=env_override`) in ext-proc structured logs.
+- `outbound-threshold-observe` also requires `strict.response_body_mime_types` to include `application/json`; otherwise it fails fast.
+- Deterministic response-phase blocking is covered by `response-body-limit-low` (expects `403`).
+- `outbound_anomaly_score_threshold` on stock podinfo responses is a tuning/visibility check, not a deterministic block signal.
 
 Per-request structured logs now include `action_results` with:
 
