@@ -61,7 +61,8 @@ manifests/
 
 services/
   coraza-ext-auth/
-    main.go
+    cmd/coraza-ext-auth/main.go
+    internal/
     Dockerfile
 
 Makefile

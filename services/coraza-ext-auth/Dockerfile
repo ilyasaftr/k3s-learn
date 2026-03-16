@@ -1,4 +1,4 @@
-FROM golang:1.24.7-alpine AS build
+FROM golang:1.25-alpine AS build
 
 WORKDIR /src
 
@@ -7,7 +7,7 @@ RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -trimpath -ldflags="-s -w" -o /out/coraza-ext-auth ./main.go
+    go build -trimpath -ldflags="-s -w" -o /out/coraza-ext-auth ./cmd/coraza-ext-auth
 
 FROM gcr.io/distroless/static-debian12:nonroot
 
