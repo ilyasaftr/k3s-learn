@@ -9,7 +9,7 @@ CORAZA_PROFILES_FILE ?= manifests/global/profiles.yaml
 APP_DIR := manifests/apps/$(APP)
 OTEL_PROFILE_DIR := manifests/global/otel-stack/profiles/$(OTEL_PROFILE)
 
-.PHONY: apply-issuer-example install-envoy-gateway install-optional-tailscale-operator install-otel-stack apply-global apply-app apply-all apply-optional-tailscale-grafana verify-global verify-tls verify-otel-stack verify-app verify-all verify-optional-tailscale-grafana clean-app clean-global clean-otel-stack clean-optional-tailscale-grafana clean-all check-app
+.PHONY: apply-issuer-example install-envoy-gateway install-optional-tailscale-operator install-otel-stack apply-global apply-app apply-all apply-optional-tailscale-grafana verify-global verify-tls verify-otel-stack verify-app verify-all verify-optional-tailscale-grafana verify-waf-checkpoint clean-app clean-global clean-otel-stack clean-optional-tailscale-grafana clean-all check-app
 
 apply-issuer-example:
 	$(KUBECTL) apply -f manifests/global/00-clusterissuer-cloudflare.example.yaml
@@ -157,6 +157,10 @@ verify-optional-tailscale-grafana:
 	$(KUBECTL) describe ingress grafana-tailscale -n observability
 	$(KUBECTL) get endpointslice -n observability -l kubernetes.io/service-name=kube-prometheus-stack-grafana
 	$(KUBECTL) describe endpointslice -n observability -l kubernetes.io/service-name=kube-prometheus-stack-grafana
+
+verify-waf-checkpoint:
+	@test -n "$$CHECKPOINT" || (echo "CHECKPOINT is required, e.g. CHECKPOINT=mode-block" && exit 1)
+	./scripts/waf_checkpoint.sh "$$CHECKPOINT"
 
 clean-app: check-app
 	-$(KUBECTL) delete -f $(APP_DIR)/alerts.yaml

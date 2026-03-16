@@ -246,8 +246,10 @@ Profile selection contract:
 Current default profile file is [profiles.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/profiles.yaml):
 
 - `default` profile example: `mode=detect`, higher anomaly thresholds, and sample rule exclusion
-- `strict` profile example: `mode=block`, lower anomaly thresholds for tighter enforcement
+- `strict` profile example: `mode=block`, lower anomaly thresholds for tighter enforcement, and JSON response MIME inspection via `response_body_mime_types`
 - `podinfo` route annotation points to `strict`
+
+If `response_body_mime_types` is unset in a profile, Coraza recommended default response MIME behavior is used.
 
 Verify policy and reference wiring:
 
@@ -270,6 +272,15 @@ Detection and blocking logs now come from the ext-proc service:
 
 ```bash
 kubectl logs -n gateway-system deploy/coraza-ext-proc-block --since=10m | grep -i interruption
+```
+
+Checkpoint validation helper (run one checkpoint at a time):
+
+```bash
+./scripts/waf_checkpoint.sh list
+./scripts/waf_checkpoint.sh mode-block
+./scripts/waf_checkpoint.sh query-no-body
+./scripts/waf_checkpoint.sh exclude-949110
 ```
 
 Per-request structured logs now include `action_results` with:

@@ -19,5 +19,10 @@ profiles:
     outbound_anomaly_score_threshold: 4
     request_body_limit_bytes: 1048576
     response_body_limit_bytes: 1048576
+    response_body_mime_types:
+      - text/plain
+      - text/html
+      - text/xml
+      - application/json
     on_error:
       default: deny
