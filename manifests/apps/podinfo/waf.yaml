@@ -17,8 +17,14 @@ spec:
           port: 9002
       messageTimeout: 200ms
       failOpen: false
+      metadata:
+        accessibleNamespaces:
+          - envoy-gateway
       processingMode:
         request:
+          attributes:
+            - xds.route_name
+            - xds.route_metadata
           body: Buffered
         response:
           body: Buffered

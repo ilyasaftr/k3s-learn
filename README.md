@@ -204,10 +204,11 @@ This repo now uses Coraza as an external processing service (`ext_proc`) with En
 - Enforcement: route-level block mode for `podinfo` only
 - Body profile: buffered request/response inspection with `1048576` byte limits
 - Runtime: standalone gRPC service (`coraza-ext-proc-block`) in `gateway-system`
+- Runtime config: profiles-only via mounted `profiles.yaml` (`WAF_PROFILES_PATH`)
 
 `podinfo` keeps a route-specific WAF policy in [waf.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/apps/podinfo/waf.yaml), while `podinfo-2` has no Coraza policy.
 
-The shared service deployment and reference grant are defined in [16-waf-coraza.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/16-waf-coraza.yaml).
+The shared service deployment, profile ConfigMap, and reference grant are defined in [16-waf-coraza.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/16-waf-coraza.yaml).
 
 Build and publish your pinned ext-proc image (owned registry) before apply:
 
@@ -228,11 +229,31 @@ export CORAZA_EXT_PROC_IMAGE="ghcr.io/<your-org>/coraza-envoy-waf@sha256:<digest
 make apply-global
 ```
 
+Profile selection contract:
+
+- HTTPRoute annotation: `gateway.envoyproxy.io/coraza-profile: <profile-name>`
+- ext_proc request attributes include `xds.route_name` and `xds.route_metadata`
+- ext_proc metadata forwarding includes `accessibleNamespaces: ["envoy-gateway"]`
+- if profile metadata is missing or unknown, the service falls back to `default_profile`
+
+Current default profile file in [16-waf-coraza.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/16-waf-coraza.yaml):
+
+- `default` profile: `mode=detect`
+- `strict` profile: `mode=block`
+- `podinfo` route annotation points to `strict`
+
+Phase-0 spike gate:
+
+- deployment currently runs with `LOG_LEVEL=DEBUG`
+- ext-proc logs include `attributes_keys` and sanitized `xds_route_metadata`
+- use this to confirm live metadata shape before tightening profile logic further
+
 Verify policy and reference wiring:
 
 ```bash
 kubectl get envoyextensionpolicy -n demo
 kubectl get referencegrant -n gateway-system
+kubectl get configmap coraza-ext-proc-profiles -n gateway-system
 kubectl get deploy,svc -n gateway-system | grep coraza-ext-proc-block
 ```
 
@@ -249,6 +270,12 @@ Detection and blocking logs now come from the ext-proc service:
 ```bash
 kubectl logs -n gateway-system deploy/coraza-ext-proc-block --since=10m | grep -i interruption
 ```
+
+Per-request structured logs now include `action_results` with:
+
+- action decision and HTTP status
+- `on_error_policy`
+- anomaly `score` and active `threshold` (with `threshold_source`)
 
 Rollback:
 

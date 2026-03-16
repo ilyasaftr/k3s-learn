@@ -71,6 +71,8 @@ kind: HTTPRoute
 metadata:
   name: podinfo
   namespace: demo
+  annotations:
+    gateway.envoyproxy.io/coraza-profile: strict
 spec:
   parentRefs:
     - name: shared-gateway
