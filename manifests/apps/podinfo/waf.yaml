@@ -1,5 +1,5 @@
 apiVersion: gateway.envoyproxy.io/v1alpha1
-kind: EnvoyExtensionPolicy
+kind: SecurityPolicy
 metadata:
   name: podinfo-waf-blocking
   namespace: demo
@@ -8,19 +8,19 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       name: podinfo
-  wasm:
-    - name: coraza-waf-podinfo-blocking
-      failOpen: true
-      code:
-        type: Image
-        image:
-          url: ghcr.io/corazawaf/coraza-proxy-wasm@sha256:d66f944831428ea27039207fa4019bea55f9ea0a876d7b0dc8cc7c9e385fa4b1
-          sha256: 65d6009b9da2e8965e592a08b74a86725435fc01aa39c756dce0bd5ea64b3f4e
-      config:
-        directives_map:
-          default:
-            - "Include @recommended-conf"
-            - "SecRuleEngine On"
-            - "Include @crs-setup-conf"
-            - "Include @owasp_crs/*.conf"
-        default_directives: default
+  extAuth:
+    grpc:
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: coraza-ext-auth
+          namespace: gateway-system
+          port: 9002
+    timeout: 50ms
+    failOpen: false
+    bodyToExtAuth:
+      maxRequestBytes: 1048576
+    contextExtensions:
+      - name: mode
+        type: Value
+        value: block

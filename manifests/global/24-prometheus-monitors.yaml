@@ -71,3 +71,26 @@ spec:
         - action: replace
           replacement: demo-app-metrics
           targetLabel: job
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: coraza-ext-auth
+  namespace: observability
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - gateway-system
+  selector:
+    matchLabels:
+      app: coraza-ext-auth
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      relabelings:
+        - action: replace
+          replacement: coraza-ext-auth
+          targetLabel: job

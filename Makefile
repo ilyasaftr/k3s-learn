@@ -3,6 +3,7 @@ HELM ?= helm
 APP ?= podinfo
 OTEL_PROFILE ?= single-node-prod-small
 OTEL_ENABLE_LOGS_TRACES ?= false
+CORAZA_EXT_AUTH_IMAGE ?=
 
 APP_DIR := manifests/apps/$(APP)
 OTEL_PROFILE_DIR := manifests/global/otel-stack/profiles/$(OTEL_PROFILE)
@@ -75,7 +76,11 @@ install-otel-stack:
 apply-global:
 	$(KUBECTL) apply -f manifests/global/10-gateway.yaml
 	$(KUBECTL) apply -f manifests/global/15-ratelimit.yaml
-	$(KUBECTL) apply -f manifests/global/16-waf-coraza.yaml
+	@test -n "$(CORAZA_EXT_AUTH_IMAGE)" || (echo "CORAZA_EXT_AUTH_IMAGE is required (digest-pinned), e.g. ghcr.io/<org>/coraza-ext-auth@sha256:<digest>" && exit 1)
+	@tmp=$$(mktemp); \
+		sed "s#__CORAZA_EXT_AUTH_IMAGE__#$(CORAZA_EXT_AUTH_IMAGE)#g" manifests/global/16-waf-coraza.yaml > $$tmp; \
+		$(KUBECTL) apply -f $$tmp; \
+		rm -f $$tmp
 	$(KUBECTL) apply -f manifests/global/20-observability.yaml
 	$(KUBECTL) apply -f manifests/global/24-prometheus-monitors.yaml
 	./scripts/grafana_dashboards.sh apply
@@ -105,9 +110,11 @@ verify-global:
 	$(KUBECTL) get gateway -n gateway-system
 	$(KUBECTL) wait -n gateway-system --for=condition=Programmed gateway/shared-gateway --timeout=180s
 	$(KUBECTL) wait -n gateway-system --for=jsonpath='{.status.conditions[?(@.type=="Accepted")].status}'=True gateway/shared-gateway --timeout=180s
-	$(KUBECTL) get envoyextensionpolicy coraza-waf -n gateway-system
-	$(KUBECTL) wait -n gateway-system --for=jsonpath='{.status.conditions[?(@.type=="Accepted")].status}'=True envoyextensionpolicy/coraza-waf --timeout=180s
-	$(KUBECTL) get deploy,svc -n gateway-system | grep -E 'envoy-gateway|redis|shared-gateway'
+	$(KUBECTL) get securitypolicy coraza-waf -n gateway-system
+	$(KUBECTL) wait -n gateway-system --for=jsonpath='{.status.conditions[?(@.type=="Accepted")].status}'=True securitypolicy/coraza-waf --timeout=180s
+	$(KUBECTL) get referencegrant coraza-ext-auth-from-demo -n gateway-system
+	$(KUBECTL) rollout status -n gateway-system deploy/coraza-ext-auth --timeout=180s
+	$(KUBECTL) get deploy,svc -n gateway-system | grep -E 'envoy-gateway|redis|shared-gateway|coraza-ext-auth'
 	$(KUBECTL) get prometheusrule -n observability
 	$(KUBECTL) get networkpolicy -n gateway-system
 	$(KUBECTL) get gateway shared-gateway -n gateway-system -o jsonpath='{.status.conditions[?(@.type=="Accepted")].message}' | grep -vi "unresolved backend reference"
@@ -123,7 +130,7 @@ verify-otel-stack:
 	$(KUBECTL) get pods -n observability
 	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(KUBECTL) get svc -n observability | grep -E 'loki|tempo|prometheus|grafana|otel-collector-(logs|traces)'; else $(KUBECTL) get svc -n observability | grep -E 'prometheus|grafana'; fi
 	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(KUBECTL) get deployment -n observability | grep -E 'otel-collector-(logs|traces)'; fi
-	$(KUBECTL) get podmonitor -n observability | grep -E 'envoy-gateway-controller|envoy-gateway-proxy|demo-app-metrics'
+	$(KUBECTL) get podmonitor -n observability | grep -E 'envoy-gateway-controller|envoy-gateway-proxy|demo-app-metrics|coraza-ext-auth'
 	./scripts/grafana_dashboards.sh verify
 	@if [ "$(OTEL_ENABLE_LOGS_TRACES)" = "true" ]; then $(KUBECTL) get configmap grafana-otel-datasources -n observability; fi
 
@@ -131,7 +138,7 @@ verify-app: check-app
 	$(KUBECTL) get deployment,svc,httproute -n demo | grep $(APP)
 	@if [ -f $(APP_DIR)/anubis.yaml ]; then $(KUBECTL) get deployment,svc -n demo | grep anubis-$(APP); fi
 	@if [ -f $(APP_DIR)/rate-limit.yaml ]; then $(KUBECTL) get backendtrafficpolicy -n demo | grep $(APP); fi
-	@if [ -f $(APP_DIR)/waf.yaml ]; then $(KUBECTL) get envoyextensionpolicy -n demo | grep $(APP); fi
+	@if [ -f $(APP_DIR)/waf.yaml ]; then $(KUBECTL) get securitypolicy -n demo | grep $(APP); fi
 	$(KUBECTL) get prometheusrule -n observability | grep $(APP)
 	$(KUBECTL) get networkpolicy -n demo | grep $(APP)
 

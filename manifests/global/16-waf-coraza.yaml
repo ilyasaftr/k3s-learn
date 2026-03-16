@@ -1,5 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coraza-ext-auth
+  namespace: gateway-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: coraza-ext-auth
+      app.kubernetes.io/name: coraza-ext-auth
+  template:
+    metadata:
+      labels:
+        app: coraza-ext-auth
+        app.kubernetes.io/name: coraza-ext-auth
+    spec:
+      containers:
+        - name: coraza-ext-auth
+          image: __CORAZA_EXT_AUTH_IMAGE__
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GRPC_BIND
+              value: ":9002"
+            - name: METRICS_BIND
+              value: ":9090"
+            - name: LOG_LEVEL
+              value: "INFO"
+          ports:
+            - name: grpc
+              containerPort: 9002
+            - name: metrics
+              containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coraza-ext-auth
+  namespace: gateway-system
+  labels:
+    app: coraza-ext-auth
+    app.kubernetes.io/name: coraza-ext-auth
+spec:
+  selector:
+    app: coraza-ext-auth
+  ports:
+    - name: grpc
+      port: 9002
+      targetPort: grpc
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: coraza-ext-auth-from-demo
+  namespace: gateway-system
+spec:
+  from:
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: demo
+  to:
+    - group: ""
+      kind: Service
+      name: coraza-ext-auth
+---
 apiVersion: gateway.envoyproxy.io/v1alpha1
-kind: EnvoyExtensionPolicy
+kind: SecurityPolicy
 metadata:
   name: coraza-waf
   namespace: gateway-system
@@ -8,19 +95,18 @@ spec:
     - group: gateway.networking.k8s.io
       kind: Gateway
       name: shared-gateway
-  wasm:
-    - name: coraza-waf
-      failOpen: true
-      code:
-        type: Image
-        image:
-          url: ghcr.io/corazawaf/coraza-proxy-wasm@sha256:d66f944831428ea27039207fa4019bea55f9ea0a876d7b0dc8cc7c9e385fa4b1
-          sha256: 65d6009b9da2e8965e592a08b74a86725435fc01aa39c756dce0bd5ea64b3f4e
-      config:
-        directives_map:
-          default:
-            - "Include @recommended-conf"
-            - "SecRuleEngine DetectionOnly"
-            - "Include @crs-setup-conf"
-            - "Include @owasp_crs/*.conf"
-        default_directives: default
+  extAuth:
+    grpc:
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: coraza-ext-auth
+          port: 9002
+    timeout: 50ms
+    failOpen: false
+    bodyToExtAuth:
+      maxRequestBytes: 1048576
+    contextExtensions:
+      - name: mode
+        type: Value
+        value: detect
