@@ -23,6 +23,8 @@ spec:
       processingMode:
         request:
           attributes:
+            - request.path
+            - request.query
             - xds.route_name
             - xds.route_metadata
           body: Buffered
