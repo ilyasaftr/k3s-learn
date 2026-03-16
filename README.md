@@ -274,6 +274,18 @@ Detection and blocking logs now come from the ext-proc service:
 kubectl logs -n gateway-system deploy/coraza-ext-proc-block --since=10m | grep -i interruption
 ```
 
+Default runtime log level for `coraza-ext-proc-block` is `INFO` to reduce memory/CPU overhead.
+For temporary deep troubleshooting, switch to `DEBUG` and revert after investigation:
+
+```bash
+kubectl -n gateway-system set env deploy/coraza-ext-proc-block LOG_LEVEL=DEBUG
+kubectl rollout status -n gateway-system deploy/coraza-ext-proc-block --timeout=180s
+
+# revert to default
+kubectl -n gateway-system set env deploy/coraza-ext-proc-block LOG_LEVEL=INFO
+kubectl rollout status -n gateway-system deploy/coraza-ext-proc-block --timeout=180s
+```
+
 Checkpoint validation helper (run one checkpoint at a time):
 
 ```bash
