@@ -76,7 +76,7 @@ install-otel-stack:
 apply-global:
 	$(KUBECTL) apply -f manifests/global/10-gateway.yaml
 	$(KUBECTL) apply -f manifests/global/15-ratelimit.yaml
-	@test -n "$(CORAZA_EXT_AUTH_IMAGE)" || (echo "CORAZA_EXT_AUTH_IMAGE is required (digest-pinned), e.g. ghcr.io/<org>/coraza-ext-auth@sha256:<digest>" && exit 1)
+	@test -n "$(CORAZA_EXT_AUTH_IMAGE)" || (echo "CORAZA_EXT_AUTH_IMAGE is required (digest-pinned), e.g. ghcr.io/<org>/coraza-envoy-ext-authz@sha256:<digest>" && exit 1)
 	@tmp=$$(mktemp); \
 		sed "s#__CORAZA_EXT_AUTH_IMAGE__#$(CORAZA_EXT_AUTH_IMAGE)#g" manifests/global/16-waf-coraza.yaml > $$tmp; \
 		$(KUBECTL) apply -f $$tmp; \

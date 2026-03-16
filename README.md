@@ -59,14 +59,11 @@ manifests/
   optional/
     tailscale/
 
-services/
-  coraza-ext-auth/
-    cmd/coraza-ext-auth/main.go
-    internal/
-    Dockerfile
-
 Makefile
 ```
+
+Coraza ext-auth service source is maintained in a separate repo:
+[ilyasaftr/coraza-envoy-ext-authz](https://github.com/ilyasaftr/coraza-envoy-ext-authz).
 
 ## Prerequisites
 
@@ -216,18 +213,19 @@ The global deployment and policy are defined in [16-waf-coraza.yaml](/Users/ilya
 Build and publish your pinned ext-auth image (owned registry) before apply:
 
 ```bash
-cd services/coraza-ext-auth
+git clone git@github.com:ilyasaftr/coraza-envoy-ext-authz.git
+cd coraza-envoy-ext-authz
 docker buildx build --platform linux/amd64 \
-  -t ghcr.io/<your-org>/coraza-ext-auth:v0.1.0 \
+  -t ghcr.io/<your-org>/coraza-envoy-ext-authz:v0.1.0 \
   --push .
 
-docker buildx imagetools inspect ghcr.io/<your-org>/coraza-ext-auth:v0.1.0
+docker buildx imagetools inspect ghcr.io/<your-org>/coraza-envoy-ext-authz:v0.1.0
 ```
 
 Then set the digest-pinned image for apply:
 
 ```bash
-export CORAZA_EXT_AUTH_IMAGE="ghcr.io/<your-org>/coraza-ext-auth@sha256:<digest>"
+export CORAZA_EXT_AUTH_IMAGE="ghcr.io/<your-org>/coraza-envoy-ext-authz@sha256:<digest>"
 make apply-global
 ```
 
