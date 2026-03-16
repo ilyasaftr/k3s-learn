@@ -288,7 +288,7 @@ url="https://${host}:18443${path}"
 status_code="$(curl "${curl_args[@]}" -o /tmp/waf-checkpoint.out -w '%{http_code}' "$url")"
 
 if [[ "$run_mode" == "observe" ]]; then
-  observe_logs="$(kubectl logs -n "$NS" deploy/"$DEPLOY" --since=2m | grep 'coraza ext_proc request summary' | grep 'path=/echo' || true)"
+  observe_logs="$(kubectl logs -n "$NS" -l app=coraza-ext-proc-block --since=2m --prefix=true | grep 'coraza ext_proc request summary' | grep 'path=/echo' || true)"
   echo "CHECKPOINT=$checkpoint STATUS=$status_code EXPECTED=$expected_code"
   printf '%s\n' "$observe_logs" | tail -n 3 || true
   if [[ "$status_code" != "$expected_code" ]]; then
