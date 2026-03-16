@@ -1,0 +1,23 @@
+default_profile: default
+profiles:
+  # Profile 1: baseline detect mode for general routes.
+  default:
+    mode: detect
+    excluded_rule_ids:
+      - 941130
+    inbound_anomaly_score_threshold: 10
+    outbound_anomaly_score_threshold: 8
+    request_body_limit_bytes: 1048576
+    response_body_limit_bytes: 1048576
+    on_error:
+      default: deny
+  # Profile 2: strict block mode for sensitive routes (podinfo uses this).
+  strict:
+    mode: block
+    excluded_rule_ids: []
+    inbound_anomaly_score_threshold: 5
+    outbound_anomaly_score_threshold: 4
+    request_body_limit_bytes: 1048576
+    response_body_limit_bytes: 1048576
+    on_error:
+      default: deny

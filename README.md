@@ -40,6 +40,7 @@ Telemetry flow
 ```text
 manifests/
   global/
+    profiles.yaml
     10-gateway.yaml
     15-ratelimit.yaml
     16-waf-coraza.yaml
@@ -178,10 +179,16 @@ The `single-node-prod-small` profile currently does all of the following when lo
 ## Apply This Repo
 
 ```bash
-export CORAZA_EXT_PROC_IMAGE="ghcr.io/<your-org>/coraza-envoy-waf@sha256:<digest>"
 make apply-global
 make apply-app APP=podinfo
 make apply-app APP=podinfo-2
+```
+
+`make apply-global` uses `ghcr.io/ilyasaftr/coraza-envoy-waf:latest` by default.  
+Override when needed:
+
+```bash
+CORAZA_EXT_PROC_IMAGE="ghcr.io/ilyasaftr/coraza-envoy-waf:latest" make apply-global
 ```
 
 `make apply-global` now installs the shared Envoy Gateway resources in `gateway-system`, Redis for `podinfo` route-scoped global rate limiting, Coraza ext-proc backend resources, direct Prometheus scrape monitors, and the vendored official Envoy Gateway Grafana dashboards.
@@ -208,7 +215,8 @@ This repo now uses Coraza as an external processing service (`ext_proc`) with En
 
 `podinfo` keeps a route-specific WAF policy in [waf.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/apps/podinfo/waf.yaml), while `podinfo-2` has no Coraza policy.
 
-The shared service deployment, profile ConfigMap, and reference grant are defined in [16-waf-coraza.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/16-waf-coraza.yaml).
+The shared service deployment and reference grant are defined in [16-waf-coraza.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/16-waf-coraza.yaml).
+Profile definitions live in [profiles.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/profiles.yaml), and `make apply-global` renders that file into `ConfigMap/coraza-ext-proc-profiles`.
 
 Build and publish your pinned ext-proc image (owned registry) before apply:
 
@@ -222,11 +230,10 @@ docker buildx build --platform linux/amd64 \
 docker buildx imagetools inspect ghcr.io/<your-org>/coraza-envoy-waf:v0.1.0
 ```
 
-Then set the digest-pinned image for apply:
+Then apply with the default image (`ghcr.io/ilyasaftr/coraza-envoy-waf:latest`) or override explicitly:
 
 ```bash
-export CORAZA_EXT_PROC_IMAGE="ghcr.io/<your-org>/coraza-envoy-waf@sha256:<digest>"
-make apply-global
+CORAZA_EXT_PROC_IMAGE="ghcr.io/ilyasaftr/coraza-envoy-waf:latest" make apply-global
 ```
 
 Profile selection contract:
@@ -236,17 +243,11 @@ Profile selection contract:
 - ext_proc metadata forwarding includes `accessibleNamespaces: ["envoy-gateway"]`
 - if profile metadata is missing or unknown, the service falls back to `default_profile`
 
-Current default profile file in [16-waf-coraza.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/16-waf-coraza.yaml):
+Current default profile file is [profiles.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/profiles.yaml):
 
-- `default` profile: `mode=detect`
-- `strict` profile: `mode=block`
+- `default` profile example: `mode=detect`, higher anomaly thresholds, and sample rule exclusion
+- `strict` profile example: `mode=block`, lower anomaly thresholds for tighter enforcement
 - `podinfo` route annotation points to `strict`
-
-Phase-0 spike gate:
-
-- deployment currently runs with `LOG_LEVEL=DEBUG`
-- ext-proc logs include `attributes_keys` and sanitized `xds_route_metadata`
-- use this to confirm live metadata shape before tightening profile logic further
 
 Verify policy and reference wiring:
 
@@ -281,6 +282,7 @@ Rollback:
 
 ```bash
 kubectl delete -f manifests/global/16-waf-coraza.yaml
+kubectl -n gateway-system delete configmap coraza-ext-proc-profiles --ignore-not-found
 kubectl delete -f manifests/apps/podinfo/waf.yaml
 ```
 

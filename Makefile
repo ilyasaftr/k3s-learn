@@ -3,7 +3,8 @@ HELM ?= helm
 APP ?= podinfo
 OTEL_PROFILE ?= single-node-prod-small
 OTEL_ENABLE_LOGS_TRACES ?= false
-CORAZA_EXT_PROC_IMAGE ?=
+CORAZA_EXT_PROC_IMAGE ?= ghcr.io/ilyasaftr/coraza-envoy-waf:latest
+CORAZA_PROFILES_FILE ?= manifests/global/profiles.yaml
 
 APP_DIR := manifests/apps/$(APP)
 OTEL_PROFILE_DIR := manifests/global/otel-stack/profiles/$(OTEL_PROFILE)
@@ -76,7 +77,11 @@ install-otel-stack:
 apply-global:
 	$(KUBECTL) apply -f manifests/global/10-gateway.yaml
 	$(KUBECTL) apply -f manifests/global/15-ratelimit.yaml
-	@test -n "$(CORAZA_EXT_PROC_IMAGE)" || (echo "CORAZA_EXT_PROC_IMAGE is required (digest-pinned), e.g. ghcr.io/<org>/coraza-envoy-waf@sha256:<digest>" && exit 1)
+	@test -f "$(CORAZA_PROFILES_FILE)" || (echo "CORAZA_PROFILES_FILE not found: $(CORAZA_PROFILES_FILE)" && exit 1)
+	$(KUBECTL) -n gateway-system create configmap coraza-ext-proc-profiles \
+		--from-file=profiles.yaml=$(CORAZA_PROFILES_FILE) \
+		--dry-run=client -o yaml | $(KUBECTL) apply -f -
+	@test -n "$(CORAZA_EXT_PROC_IMAGE)" || (echo "CORAZA_EXT_PROC_IMAGE is required, e.g. ghcr.io/ilyasaftr/coraza-envoy-waf:latest" && exit 1)
 	@tmp=$$(mktemp); \
 		sed "s#__CORAZA_EXT_PROC_IMAGE__#$(CORAZA_EXT_PROC_IMAGE)#g" manifests/global/16-waf-coraza.yaml > $$tmp; \
 		$(KUBECTL) apply -f $$tmp; \
@@ -169,6 +174,7 @@ clean-global:
 	-$(KUBECTL) delete -f manifests/global/24-prometheus-monitors.yaml
 	-$(KUBECTL) delete -f manifests/global/20-observability.yaml
 	-$(KUBECTL) delete -f manifests/global/16-waf-coraza.yaml
+	-$(KUBECTL) -n gateway-system delete configmap coraza-ext-proc-profiles --ignore-not-found
 	-$(KUBECTL) delete -f manifests/global/15-ratelimit.yaml
 	-$(KUBECTL) delete -f manifests/global/10-gateway.yaml
 
