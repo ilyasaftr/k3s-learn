@@ -14,6 +14,7 @@ profiles:
   # Profile 2: strict block mode for sensitive routes (podinfo uses this).
   strict:
     mode: block
+    early_blocking: true
     excluded_rule_ids: []
     inbound_anomaly_score_threshold: 5
     outbound_anomaly_score_threshold: 4
