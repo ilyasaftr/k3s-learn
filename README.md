@@ -209,9 +209,11 @@ This repo now uses Coraza as an external processing service (`ext_proc`) with En
 
 - Scope: no global WAF policy on `shared-gateway`
 - Enforcement: route-level block mode for `podinfo` only
-- Body profile: buffered request/response inspection with `1048576` byte limits
+- Body profile: buffered request inspection by default; response inspection is opt-in per route/policy
 - Runtime: standalone gRPC service (`coraza-ext-proc-block`) in `gateway-system`
 - Runtime config: profiles-only via mounted `profiles.yaml` (`WAF_PROFILES_PATH`)
+- Scaling: default `HorizontalPodAutoscaler` on `coraza-ext-proc-block` (`minReplicas=2`, `maxReplicas=6`, CPU target `70%`)
+- Stream workers: `GRPC_NUM_STREAM_WORKERS` is supported for benchmark-gated grpc-go stream-worker pilots and defaults to `0`
 
 `podinfo` keeps a route-specific WAF policy in [waf.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/apps/podinfo/waf.yaml), while `podinfo-2` has no Coraza policy.
 
@@ -246,10 +248,39 @@ Profile selection contract:
 Current default profile file is [profiles.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/profiles.yaml):
 
 - `default` profile example: `mode=detect`, higher anomaly thresholds, and sample rule exclusion
-- `strict` profile example: `mode=block`, lower anomaly thresholds for tighter enforcement, and JSON response MIME inspection via `response_body_mime_types`
+- both shipped profiles explicitly pin `blocking_paranoia_level: 1` to preserve current CRS posture
+- `strict` profile example: `mode=block`, lower anomaly thresholds for tighter enforcement, CRS early blocking, and JSON response MIME inspection via `response_body_mime_types`
 - `podinfo` route annotation points to `strict`
 
 If `response_body_mime_types` is unset in a profile, Coraza recommended default response MIME behavior is used.
+
+Current route policy default for `podinfo`:
+
+- `messageTimeout: 750ms`
+- `failOpen: false`
+- request body inspection stays `Buffered`
+- response body inspection is not enabled on the default route path
+
+This matches the current benchmarked fast path: request-phase inspection stays on the default route, while response-phase inspection is enabled only where you explicitly need it.
+
+To benchmark grpc-go stream workers without changing the normal default, override the deployment env at apply time:
+
+```bash
+CORAZA_EXT_PROC_GRPC_NUM_STREAM_WORKERS=4 make apply-global
+```
+
+If you want full request+response inspection on a specific route, use a route-level `EnvoyExtensionPolicy` variant that adds:
+
+```yaml
+processingMode:
+  request:
+    attributes:
+      - xds.route_name
+      - xds.route_metadata
+    body: Buffered
+  response:
+    body: Buffered
+```
 
 Verify policy and reference wiring:
 
@@ -301,6 +332,7 @@ Checkpoint semantics:
 
 - `outbound-threshold-observe` is intentionally observe-only: it enforces `strict.mode=detect` and validates response-phase evidence (`action=response_body`, `threshold=1`, `threshold_source=env_override`) in ext-proc structured logs.
 - `outbound-threshold-observe` also requires `strict.response_body_mime_types` to include `application/json`; otherwise it fails fast.
+- response-phase checkpoints temporarily re-enable response buffering for `podinfo`; the default route policy remains request-phase focused.
 - Deterministic response-phase blocking is covered by `response-body-limit-low` (expects `403`).
 - `outbound_anomaly_score_threshold` on stock podinfo responses is a tuning/visibility check, not a deterministic block signal.
 
@@ -339,6 +371,7 @@ kubectl get pvc -n observability
 - Envoy Gateway is running in `gateway-system`
 - `redis` is up in `gateway-system`
 - `coraza-ext-proc-block` is ready in `gateway-system`
+- the `coraza-ext-proc-block` HPA exists and its CPU metric is populated
 - `ReferenceGrant` for app-level `EnvoyExtensionPolicy` is present
 - `shared-gateway` is accepted and programmed
 
@@ -424,8 +457,10 @@ In Grafana, verify:
 - The limit is shared across all `shared-gateway` replicas, so scaling the gateway does not double the effective `podinfo` quota.
 - `podinfo-2` and other routes on `shared-gateway` are not rate-limited by this config.
 - Coraza WAF is now enforced through route-level `EnvoyExtensionPolicy.extProc` with a dedicated `coraza-ext-proc-block` gRPC service.
-- WAF inspection for `podinfo` includes request and response phases with buffered body processing.
+- WAF inspection for `podinfo` uses buffered request-body inspection by default; response-body inspection is opt-in for routes that need it.
 - Ext-proc WAF is configured fail-closed; if `coraza-ext-proc-block` is unavailable, `podinfo` requests are denied by design.
+- HPA is part of the default WAF deployment and depends on working cluster resource metrics.
+- CRS paranoia is now controlled per profile through `blocking_paranoia_level` and optional `detection_paranoia_level`.
 - App `/metrics` scraping is retained through direct Prometheus scraping, so app-level operational visibility remains.
 - Loki, Tempo, and the OTLP log/trace collectors are disabled by default in the repo flow, but can be re-enabled later with `OTEL_ENABLE_LOGS_TRACES=true`.
 - `shared-gateway` now gets explicit Envoy resource requests and limits via `EnvoyProxy`.
@@ -461,6 +496,56 @@ Or remove observability stack only:
 ```bash
 make clean-otel-stack
 ```
+
+## Benchmark Harness (DigitalOcean A/B)
+
+This repo includes a benchmark harness to compare:
+
+- `coraza-envoy-waf` (ext_proc service), and
+- `coraza-envoy-go-filter` (via custom install hook).
+
+Artifacts are written to `artifacts/<run-id>/`.
+
+Setup:
+
+```bash
+cp bench.env.example bench.env
+# fill DO_TOKEN + DO_SSH_KEY_FINGERPRINT
+```
+
+Run:
+
+```bash
+make bench-create
+make bench-bootstrap
+make bench-run
+make bench-destroy
+```
+
+Mode presets:
+
+```bash
+# default quick loop
+BENCH_MODE=fast-dev make bench-run
+
+# slower comparison-grade run
+BENCH_MODE=full make bench-run
+```
+
+Notes:
+
+- `BENCH_MODE=fast-dev` is now the default operator flow. It uses scenario `10`, `1` repeat, `20s` duration, and `3s/2s` warmup/cooldown for faster iteration.
+- `BENCH_MODE=full` restores the heavier comparison path with scenarios `1 10`, `3` repeats, `60s` duration, and `8s/6s` warmup/cooldown.
+- If you set `BENCH_SCENARIOS`, `BENCH_REPEATS`, `BENCH_DURATION`, `BENCH_WARMUP`, or `BENCH_COOLDOWN` explicitly, those values override the preset.
+- The default `scripts/bench/hooks/install_go_filter_variant.sh` now builds `coraza-envoy-go-filter`, imports a custom Envoy contrib image into k3s, and injects `envoy.filters.http.golang` with `EnvoyPatchPolicy`.
+- This hook expects k3s single-node SUT and uses 4KB request/response body limits for comparability with the benchmark profile.
+- Default ext_proc benchmark settings now use `messageTimeout=750ms`, `request.body=Buffered`, and `response.body=None` to match the recommended production fast path.
+- `750ms` is the current safe fail-closed timeout baseline from the March 18, 2026 benchmark set; `200ms` produced Envoy `ext_proc_error_per-message_timeout_exceeded` under buffered response inspection.
+- In the measured A/B runs, `coraza-envoy-waf` did not trail go-filter on p95; the latency problem came from unnecessary response-phase buffering on the default route.
+- grpc-go stream-worker pilots use `BENCH_WAF_NUM_STREAM_WORKERS` and default to `0` (disabled).
+- If you want the higher-cost full inspection path in benchmarks, set `BENCH_WAF_RESPONSE_BODY_MODE=Buffered`.
+- Scenario preparation and enforcement probes now run in parallel across the two SUTs, but the actual k6 load still runs serially between variants for fairness.
+- Harness uses one driver droplet + two SUT droplets and tags resources by run id for cleanup.
 
 ## Troubleshooting
 
