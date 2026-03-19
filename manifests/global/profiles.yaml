@@ -6,6 +6,7 @@ profiles:
       SecRuleEngine DetectionOnly
       SecRequestBodyAccess Off
       SecRequestBodyLimit 4096
+      SecRequestBodyInMemoryLimit 4096
       SecRequestBodyLimitAction Reject
       SecResponseBodyAccess Off
       SecResponseBodyLimit 4096
@@ -21,6 +22,7 @@ profiles:
       SecRuleEngine On
       SecRequestBodyAccess Off
       SecRequestBodyLimit 4096
+      SecRequestBodyInMemoryLimit 4096
       SecRequestBodyLimitAction Reject
       SecResponseBodyAccess Off
       SecResponseBodyLimit 4096
