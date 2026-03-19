@@ -25,6 +25,3 @@ spec:
           attributes:
             - xds.route_name
             - xds.route_metadata
-          body: None
-        response:
-          body: None
