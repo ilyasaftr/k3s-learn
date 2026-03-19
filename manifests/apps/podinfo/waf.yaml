@@ -16,7 +16,7 @@ spec:
           namespace: gateway-system
           port: 9002
       messageTimeout: 200ms
-      failOpen: false
+      failOpen: true
       metadata:
         accessibleNamespaces:
           - envoy-gateway
@@ -25,6 +25,6 @@ spec:
           attributes:
             - xds.route_name
             - xds.route_metadata
-          body: Buffered
+          body: None
         response:
-          body: Buffered
+          body: None
