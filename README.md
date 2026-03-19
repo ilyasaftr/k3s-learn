@@ -247,12 +247,12 @@ Profile selection contract:
 
 Current default profile file is [profiles.yaml](/Users/ilyasa/Developer/k3s-learn/manifests/global/profiles.yaml):
 
-- `default` profile example: `mode=detect`, higher anomaly thresholds, and sample rule exclusion
-- both shipped profiles explicitly pin `blocking_paranoia_level: 1` to preserve current CRS posture
-- `strict` profile example: `mode=block`, lower anomaly thresholds for tighter enforcement, CRS early blocking, and JSON response MIME inspection via `response_body_mime_types`
+- each profile is now a raw Coraza `directives: |` block, and the service only validates that the block contains exactly one explicit `SecRuleEngine`
+- `default` profile example uses `SecRuleEngine DetectionOnly`, higher anomaly thresholds, and a sample `SecRuleRemoveById 941130`
+- `strict` profile example uses `SecRuleEngine On`, lower anomaly thresholds, CRS early blocking, and JSON response MIME inspection
 - `podinfo` route annotation points to `strict`
 
-If `response_body_mime_types` is unset in a profile, Coraza recommended default response MIME behavior is used.
+If you include `@coraza.conf-recommended`, keep your explicit `SecRuleEngine` after it because the recommended file defaults to `DetectionOnly`.
 
 Current route policy default for `podinfo`:
 
@@ -330,8 +330,8 @@ Checkpoint validation helper (run one checkpoint at a time):
 
 Checkpoint semantics:
 
-- `outbound-threshold-observe` is intentionally observe-only: it enforces `strict.mode=detect` and validates response-phase evidence (`action=response_body`, `threshold=1`, `threshold_source=env_override`) in ext-proc structured logs.
-- `outbound-threshold-observe` also requires `strict.response_body_mime_types` to include `application/json`; otherwise it fails fast.
+- `outbound-threshold-observe` is intentionally observe-only: it rewrites the `strict` profile to `SecRuleEngine DetectionOnly` and validates response-phase evidence (`action=response_body`, `threshold=1`, `threshold_source=profile_directive`) in ext-proc structured logs.
+- `outbound-threshold-observe` also requires the `strict` profile directives to include `SecResponseBodyMimeType ... application/json`; otherwise it fails fast.
 - response-phase checkpoints temporarily re-enable response buffering for `podinfo`; the default route policy remains request-phase focused.
 - Deterministic response-phase blocking is covered by `response-body-limit-low` (expects `403`).
 - `outbound_anomaly_score_threshold` on stock podinfo responses is a tuning/visibility check, not a deterministic block signal.
@@ -339,8 +339,8 @@ Checkpoint semantics:
 Per-request structured logs now include `action_results` with:
 
 - action decision and HTTP status
-- `on_error_policy`
 - anomaly `score` and active `threshold` (with `threshold_source`)
+- rule interruption evidence when Coraza blocks
 
 Rollback:
 
@@ -460,7 +460,8 @@ In Grafana, verify:
 - WAF inspection for `podinfo` uses buffered request-body inspection by default; response-body inspection is opt-in for routes that need it.
 - Ext-proc WAF is configured fail-closed; if `coraza-ext-proc-block` is unavailable, `podinfo` requests are denied by design.
 - HPA is part of the default WAF deployment and depends on working cluster resource metrics.
-- CRS paranoia is now controlled per profile through `blocking_paranoia_level` and optional `detection_paranoia_level`.
+- Coraza profile tuning now lives directly in raw profile directives, and each profile must carry exactly one explicit `SecRuleEngine`.
+- Service-internal ext-proc action errors are hardcoded fail-open and remain visible in structured logs.
 - App `/metrics` scraping is retained through direct Prometheus scraping, so app-level operational visibility remains.
 - Loki, Tempo, and the OTLP log/trace collectors are disabled by default in the repo flow, but can be re-enabled later with `OTEL_ENABLE_LOGS_TRACES=true`.
 - `shared-gateway` now gets explicit Envoy resource requests and limits via `EnvoyProxy`.

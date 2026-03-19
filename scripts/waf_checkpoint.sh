@@ -81,32 +81,73 @@ assert_outbound_observe_contract() {
   local profiles_yaml strict_block strict_mode_value
   profiles_yaml="$(load_profiles_yaml_from_configmap)"
   strict_block="$(printf '%s\n' "$profiles_yaml" | extract_strict_block)"
-  strict_mode_value="$(printf '%s\n' "$strict_block" | awk '/^[[:space:]]*mode:[[:space:]]*/ {print $2; exit}')"
+  strict_mode_value="$(printf '%s\n' "$strict_block" | awk '/^[[:space:]]*SecRuleEngine[[:space:]]+/ {print $2; exit}')"
 
-  if [[ "$strict_mode_value" != "detect" ]]; then
+  if [[ "$strict_mode_value" != "DetectionOnly" ]]; then
     echo "RESULT=FAIL"
-    echo "reason=outbound-threshold-observe requires strict.mode=detect, found strict.mode=${strict_mode_value:-<empty>}"
+    echo "reason=outbound-threshold-observe requires strict SecRuleEngine DetectionOnly, found ${strict_mode_value:-<empty>}"
     exit 1
   fi
 
-  if ! printf '%s\n' "$strict_block" | grep -Eq '^[[:space:]]*-[[:space:]]*application/json[[:space:]]*$'; then
+  if ! printf '%s\n' "$strict_block" | grep -Eq '^[[:space:]]*SecResponseBodyMimeType[[:space:]].*application/json([[:space:]]|$)'; then
     echo "RESULT=FAIL"
-    echo "reason=outbound-threshold-observe requires strict.response_body_mime_types to include application/json"
+    echo "reason=outbound-threshold-observe requires strict directives to include application/json in SecResponseBodyMimeType"
     exit 1
   fi
 }
 
-strict_mode="block"
-strict_excluded="[]"
+render_default_directives() {
+  cat <<'EOF'
+      Include @coraza.conf-recommended
+      SecRuleEngine DetectionOnly
+      SecRequestBodyAccess On
+      SecRequestBodyLimit 1048576
+      SecRequestBodyLimitAction Reject
+      SecResponseBodyAccess On
+      SecResponseBodyLimit 1048576
+      SecResponseBodyLimitAction Reject
+      Include @crs-setup.conf.example
+      SecAction "id:10000001,phase:1,pass,nolog,t:none,setvar:tx.blocking_paranoia_level=1"
+      SecAction "id:10000002,phase:1,pass,nolog,t:none,setvar:tx.inbound_anomaly_score_threshold=10"
+      SecAction "id:10000003,phase:1,pass,nolog,t:none,setvar:tx.outbound_anomaly_score_threshold=8"
+      Include @owasp_crs/*.conf
+      SecRuleRemoveById 941130
+EOF
+}
+
+render_strict_directives() {
+  local engine="$1" excluded="$2" inbound="$3" outbound="$4" request_limit="$5" response_limit="$6" response_mimes="$7"
+
+  cat <<EOF
+      Include @coraza.conf-recommended
+      SecRuleEngine ${engine}
+      SecRequestBodyAccess On
+      SecRequestBodyLimit ${request_limit}
+      SecRequestBodyLimitAction Reject
+      SecResponseBodyAccess On
+      SecResponseBodyLimit ${response_limit}
+      SecResponseBodyLimitAction Reject
+      SecResponseBodyMimeType ${response_mimes}
+      Include @crs-setup.conf.example
+      SecAction "id:10000101,phase:1,pass,nolog,t:none,setvar:tx.blocking_paranoia_level=1"
+      SecAction "id:10000102,phase:1,pass,nolog,t:none,setvar:tx.inbound_anomaly_score_threshold=${inbound}"
+      SecAction "id:10000103,phase:1,pass,nolog,t:none,setvar:tx.outbound_anomaly_score_threshold=${outbound}"
+      SecAction "id:10000104,phase:1,pass,nolog,t:none,setvar:tx.early_blocking=1"
+      Include @owasp_crs/*.conf
+EOF
+
+  if [[ -n "$excluded" ]]; then
+    printf '      SecRuleRemoveById %s\n' "$excluded"
+  fi
+}
+
+strict_engine="On"
+strict_excluded=""
 strict_inbound="5"
 strict_outbound="4"
 strict_request_limit="1048576"
 strict_response_limit="1048576"
-strict_on_error="deny"
-strict_mimes="      - text/plain
-      - text/html
-      - text/xml
-      - application/json"
+strict_mimes="text/plain text/html text/xml application/json"
 
 run_mode="status"
 host="podinfo.klawu.com"
@@ -117,7 +158,7 @@ expected_code="200"
 
 case "$checkpoint" in
   mode-detect)
-    strict_mode="detect"
+    strict_engine="DetectionOnly"
     run_mode="status"
     path="/echo"
     method="POST"
@@ -125,7 +166,7 @@ case "$checkpoint" in
     expected_code="202"
     ;;
   mode-block)
-    strict_mode="block"
+    strict_engine="On"
     run_mode="status"
     path="/echo"
     method="POST"
@@ -133,8 +174,8 @@ case "$checkpoint" in
     expected_code="403"
     ;;
   exclude-949110)
-    strict_mode="block"
-    strict_excluded="[949110]"
+    strict_engine="On"
+    strict_excluded="949110"
     run_mode="status"
     path="/echo"
     method="POST"
@@ -142,7 +183,7 @@ case "$checkpoint" in
     expected_code="202"
     ;;
   inbound-threshold-high)
-    strict_mode="block"
+    strict_engine="On"
     strict_inbound="100"
     run_mode="status"
     path="/echo"
@@ -151,7 +192,7 @@ case "$checkpoint" in
     expected_code="202"
     ;;
   inbound-threshold-low)
-    strict_mode="block"
+    strict_engine="On"
     strict_inbound="1"
     run_mode="status"
     path="/echo"
@@ -160,7 +201,7 @@ case "$checkpoint" in
     expected_code="403"
     ;;
   outbound-threshold-observe)
-    strict_mode="detect"
+    strict_engine="DetectionOnly"
     strict_outbound="1"
     run_mode="observe"
     path="/echo"
@@ -169,7 +210,7 @@ case "$checkpoint" in
     expected_code="202"
     ;;
   request-body-limit-low)
-    strict_mode="block"
+    strict_engine="On"
     strict_inbound="100"
     strict_outbound="100"
     strict_request_limit="16"
@@ -180,7 +221,7 @@ case "$checkpoint" in
     expected_code="403"
     ;;
   request-body-limit-default)
-    strict_mode="block"
+    strict_engine="On"
     strict_inbound="100"
     strict_outbound="100"
     strict_request_limit="1048576"
@@ -191,7 +232,7 @@ case "$checkpoint" in
     expected_code="202"
     ;;
   response-body-limit-low)
-    strict_mode="block"
+    strict_engine="On"
     strict_inbound="100"
     strict_outbound="100"
     strict_response_limit="16"
@@ -201,7 +242,7 @@ case "$checkpoint" in
     expected_code="403"
     ;;
   response-body-limit-default)
-    strict_mode="block"
+    strict_engine="On"
     strict_inbound="100"
     strict_outbound="100"
     strict_response_limit="1048576"
@@ -211,14 +252,14 @@ case "$checkpoint" in
     expected_code="200"
     ;;
   query-no-body)
-    strict_mode="block"
+    strict_engine="On"
     run_mode="status"
     path='/?q=<script>alert(1)</script>'
     method="GET"
     expected_code="403"
     ;;
   scope-podinfo2-unaffected)
-    strict_mode="block"
+    strict_engine="On"
     run_mode="status"
     host="podinfo-2.klawu.com"
     path='/?q=<script>alert(1)</script>'
@@ -232,30 +273,17 @@ case "$checkpoint" in
 esac
 
 tmp_profiles="$(mktemp)"
+default_directives="$(render_default_directives)"
+strict_directives="$(render_strict_directives "$strict_engine" "$strict_excluded" "$strict_inbound" "$strict_outbound" "$strict_request_limit" "$strict_response_limit" "$strict_mimes")"
 cat > "$tmp_profiles" <<EOF
 default_profile: default
 profiles:
   default:
-    mode: detect
-    excluded_rule_ids:
-      - 941130
-    inbound_anomaly_score_threshold: 10
-    outbound_anomaly_score_threshold: 8
-    request_body_limit_bytes: 1048576
-    response_body_limit_bytes: 1048576
-    on_error:
-      default: deny
+    directives: |
+${default_directives}
   strict:
-    mode: ${strict_mode}
-    excluded_rule_ids: ${strict_excluded}
-    inbound_anomaly_score_threshold: ${strict_inbound}
-    outbound_anomaly_score_threshold: ${strict_outbound}
-    request_body_limit_bytes: ${strict_request_limit}
-    response_body_limit_bytes: ${strict_response_limit}
-    response_body_mime_types:
-${strict_mimes}
-    on_error:
-      default: ${strict_on_error}
+    directives: |
+${strict_directives}
 EOF
 
 kubectl create configmap "$CM_NAME" -n "$NS" \
@@ -315,9 +343,9 @@ if [[ "$run_mode" == "observe" ]]; then
     echo "reason=missing threshold=1 evidence for response_body action"
     exit 1
   fi
-  if ! printf '%s\n' "$observe_logs" | grep -Eq 'threshold_source[:=]env_override'; then
+  if ! printf '%s\n' "$observe_logs" | grep -Eq 'threshold_source[:=]profile_directive'; then
     echo "RESULT=FAIL"
-    echo "reason=missing threshold_source=env_override evidence for response_body action"
+    echo "reason=missing threshold_source=profile_directive evidence for response_body action"
     exit 1
   fi
   echo "RESULT=PASS (observe)"

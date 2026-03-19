@@ -65,6 +65,8 @@ const status403 = new Counter("status_403");
 const hosts = (__ENV.HOSTS_CSV || "").split(",").filter(Boolean);
 const targetIp = __ENV.TARGET_IP;
 const scheme = __ENV.SCHEME || "http";
+const expectedAttackStatus = Number(__ENV.EXPECT_ATTACK_STATUS || 403);
+const expected200 = http.expectedStatuses(200);
 
 export const options = {
   vus: Number(__ENV.VUS || 100),
@@ -83,17 +85,23 @@ export default function () {
   const host = nextHost();
   const r = Math.random();
   let path = "/";
+  let isAttack = false;
   if (r < Number(__ENV.ATTACK_RATE || 0.02)) {
     path = "/?q=%3Cscript%3Ealert(1)%3C/script%3E";
+    isAttack = true;
   } else if (r < Number(__ENV.ATTACK_RATE || 0.02) + Number(__ENV.INFO_RATE || 0.08)) {
     path = "/api/info";
   }
   const url = `${scheme}://${targetIp}${path}`;
-  const res = http.get(url, {
+  const params = {
     headers: {
       Host: host,
       "User-Agent": "k6-ab-bench/1.0",
     },
+    responseCallback: isAttack ? http.expectedStatuses(expectedAttackStatus) : expected200,
+  };
+  const res = http.get(url, {
+    ...params,
   });
 
   if (res.status >= 200 && res.status < 300) status2xx.add(1);
@@ -310,6 +318,11 @@ EOF
     render_wasm_policy "${n}" "${policy_manifest}"
     scp_to "${policy_manifest}" "${ip}" "/tmp/bench-wasm.yaml"
     ssh_run "${ip}" "kubectl apply -f /tmp/bench-wasm.yaml && kubectl -n bench get envoyextensionpolicy bench-wasm -o yaml >/tmp/bench-wasm-status.yaml"
+  elif [[ "${variant_kind}" == "envoy-only" ]]; then
+    # Ensure no benchmark WAF policy remains on this SUT.
+    ssh_run "${ip}" "kubectl -n bench delete envoyextensionpolicy bench-waf --ignore-not-found=true"
+    ssh_run "${ip}" "kubectl -n bench delete envoyextensionpolicy bench-wasm --ignore-not-found=true"
+    ssh_run "${ip}" "kubectl -n gateway-system delete envoypatchpolicy bench-go-filter --ignore-not-found=true"
   fi
 }
 
@@ -344,9 +357,20 @@ check_policy_ready_on_sut() {
     ssh_run "${ip}" "kubectl -n gateway-system wait --for=jsonpath='{.status.ancestors[0].conditions[?(@.type==\"Programmed\")].status}'=True envoypatchpolicy/bench-go-filter --timeout=180s"
   elif [[ "${variant_kind}" == "wasm" ]]; then
     ssh_run "${ip}" "kubectl -n bench wait --for=jsonpath='{.status.ancestors[0].conditions[?(@.type==\"Accepted\")].status}'=True envoyextensionpolicy/bench-wasm --timeout=180s"
+  elif [[ "${variant_kind}" == "envoy-only" ]]; then
+    return 0
   else
     die "unsupported variant kind for policy readiness: ${variant_kind}"
   fi
+}
+
+expected_attack_status() {
+  local variant_kind="$1"
+  if [[ "${variant_kind}" == "envoy-only" ]]; then
+    printf "200\n"
+    return
+  fi
+  printf "403\n"
 }
 
 enforcement_probe() {
@@ -354,15 +378,16 @@ enforcement_probe() {
   local variant_label="$2"
   local variant_kind="$3"
   local host="$4"
-  local benign attack
+  local benign attack expected_attack
 
   check_policy_ready_on_sut "${ip}" "${variant_kind}"
+  expected_attack="$(expected_attack_status "${variant_kind}")"
 
   benign="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: ${host}" "http://${ip}/" || true)"
   attack="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: ${host}" "http://${ip}/?q=%3Cscript%3Ealert(1)%3C/script%3E" || true)"
 
   [[ "${benign}" == "200" ]] || die "enforcement gate failed on ${variant_label} (${ip}): benign expected 200, got ${benign}"
-  [[ "${attack}" == "403" ]] || die "enforcement gate failed on ${variant_label} (${ip}): attack expected 403, got ${attack}"
+  [[ "${attack}" == "${expected_attack}" ]] || die "enforcement gate failed on ${variant_label} (${ip}): attack expected ${expected_attack}, got ${attack}"
 }
 
 enforcement_gate_for_scenario() {
@@ -374,7 +399,9 @@ enforcement_gate_for_scenario() {
   if (( scenario > 0 )); then
     host="podinfo-1.klawu.com"
   fi
-  log "enforcement gate scenario=${scenario}: require 200 benign + 403 attack on both variants"
+  local alt_attack_expected
+  alt_attack_expected="$(expected_attack_status "${ALT_VARIANT_KIND}")"
+  log "enforcement gate scenario=${scenario}: require 200 benign + 403 attack on waf and ${alt_attack_expected} attack on ${ALT_VARIANT_NAME}"
   (
     enforcement_probe "${SUT_WAF_IP}" "waf" "waf" "${host}"
   ) > "${waf_log}" 2>&1 &
@@ -491,18 +518,22 @@ run_k6_once() {
   local hosts_csv="$2"
   local scenario="$3"
   local variant="$4"
-  local repeat="$5"
+  local variant_kind="$5"
+  local repeat="$6"
   local local_summary="${RAW_DIR}/k6-${variant}-s${scenario}-r${repeat}.json"
   local local_log="${RAW_DIR}/k6-${variant}-s${scenario}-r${repeat}.log"
+  local expect_attack_status
+  expect_attack_status="$(expected_attack_status "${variant_kind}")"
 
   if [[ "${BENCH_DRIVER_IP}" == "local" ]]; then
     k6 run "${K6_REMOTE_SCRIPT}" --summary-export "${K6_REMOTE_SUMMARY}" --vus "${BENCH_VUS}" --duration "${BENCH_DURATION}" \
       -e TARGET_IP="${target_ip}" -e HOSTS_CSV="${hosts_csv}" -e SCHEME=http \
-      -e ATTACK_RATE="${BENCH_ATTACK_RATE}" -e INFO_RATE="${BENCH_INFO_RATE}" > "${K6_REMOTE_OUT}" 2>&1
+      -e ATTACK_RATE="${BENCH_ATTACK_RATE}" -e INFO_RATE="${BENCH_INFO_RATE}" \
+      -e EXPECT_ATTACK_STATUS="${expect_attack_status}" > "${K6_REMOTE_OUT}" 2>&1
     cat "${K6_REMOTE_SUMMARY}" > "${local_summary}"
     cat "${K6_REMOTE_OUT}" > "${local_log}"
   else
-    ssh_run "${BENCH_DRIVER_IP}" "k6 run ${K6_REMOTE_SCRIPT} --summary-export ${K6_REMOTE_SUMMARY} --vus ${BENCH_VUS} --duration ${BENCH_DURATION} -e TARGET_IP=${target_ip} -e HOSTS_CSV='${hosts_csv}' -e SCHEME=http -e ATTACK_RATE=${BENCH_ATTACK_RATE} -e INFO_RATE=${BENCH_INFO_RATE} > ${K6_REMOTE_OUT} 2>&1"
+    ssh_run "${BENCH_DRIVER_IP}" "k6 run ${K6_REMOTE_SCRIPT} --summary-export ${K6_REMOTE_SUMMARY} --vus ${BENCH_VUS} --duration ${BENCH_DURATION} -e TARGET_IP=${target_ip} -e HOSTS_CSV='${hosts_csv}' -e SCHEME=http -e ATTACK_RATE=${BENCH_ATTACK_RATE} -e INFO_RATE=${BENCH_INFO_RATE} -e EXPECT_ATTACK_STATUS=${expect_attack_status} > ${K6_REMOTE_OUT} 2>&1"
     ssh_run "${BENCH_DRIVER_IP}" "cat ${K6_REMOTE_SUMMARY}" > "${local_summary}"
     ssh_run "${BENCH_DRIVER_IP}" "cat ${K6_REMOTE_OUT}" > "${local_log}"
   fi
@@ -533,7 +564,9 @@ append_result() {
   s403="$(jq -r '.metrics.status_403.values.count // .metrics.status_403.count // 0' "${summary}")"
 
   local waf_cpu_mem envoy_cpu_mem waf_cpu waf_mem envoy_cpu envoy_mem waf_pod_pattern
-  if [[ "${variant_kind}" == "go-filter" || "${variant_kind}" == "wasm" ]]; then
+  if [[ "${variant_kind}" == "envoy-only" ]]; then
+    waf_pod_pattern="^$"
+  elif [[ "${variant_kind}" == "go-filter" || "${variant_kind}" == "wasm" ]]; then
     waf_pod_pattern="shared-gateway|envoy"
   else
     waf_pod_pattern="coraza-ext-proc-block|coraza-go-filter|waf"
@@ -648,7 +681,7 @@ for scenario in ${BENCH_SCENARIOS}; do
     log "run variant=waf scenario=${scenario} repeat=${repeat}"
     start_sampler "${SUT_WAF_IP}" "waf" "waf" "${scenario}" "${repeat}"
     sleep "${BENCH_WARMUP}"
-    run_k6_once "${SUT_WAF_IP}" "${hosts_csv}" "${scenario}" "waf" "${repeat}"
+    run_k6_once "${SUT_WAF_IP}" "${hosts_csv}" "${scenario}" "waf" "waf" "${repeat}"
     sleep "${BENCH_COOLDOWN}"
     stop_sampler_and_fetch "${SUT_WAF_IP}" "waf" "${scenario}" "${repeat}"
     append_result "waf" "${scenario}" "${repeat}" "waf"
@@ -656,7 +689,7 @@ for scenario in ${BENCH_SCENARIOS}; do
     log "run variant=${ALT_VARIANT_NAME} scenario=${scenario} repeat=${repeat}"
     start_sampler "${SUT_GOFILTER_IP}" "${ALT_VARIANT_NAME}" "${ALT_VARIANT_KIND}" "${scenario}" "${repeat}"
     sleep "${BENCH_WARMUP}"
-    run_k6_once "${SUT_GOFILTER_IP}" "${hosts_csv}" "${scenario}" "${ALT_VARIANT_NAME}" "${repeat}"
+    run_k6_once "${SUT_GOFILTER_IP}" "${hosts_csv}" "${scenario}" "${ALT_VARIANT_NAME}" "${ALT_VARIANT_KIND}" "${repeat}"
     sleep "${BENCH_COOLDOWN}"
     stop_sampler_and_fetch "${SUT_GOFILTER_IP}" "${ALT_VARIANT_NAME}" "${scenario}" "${repeat}"
     append_result "${ALT_VARIANT_NAME}" "${scenario}" "${repeat}" "${ALT_VARIANT_KIND}"
